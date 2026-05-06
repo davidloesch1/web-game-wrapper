@@ -1,0 +1,25 @@
+# .github/workflows/weekly-evolution.yml
+name: Weekly Evolution Pipeline
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Every Monday at 6am UTC
+  workflow_dispatch: {}   # Manual trigger for testing
+
+jobs:
+  evolve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install -r pipeline/requirements.txt
+
+      - name: Run evolution pipeline
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BIGQUERY_CREDENTIALS: ${{ secrets.BIGQUERY_CREDENTIALS }}
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: python pipeline/run.py
