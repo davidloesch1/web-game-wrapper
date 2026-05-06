@@ -15,6 +15,7 @@ export default function VersionTimeline({ experiments }: Props) {
       <div className="space-y-8">
         {sorted.map((exp) => {
           const isRunning = exp.status === 'running'
+          const isComplete = exp.status === 'complete'
           const winnerLabel =
             exp.winner === 'a'
               ? 'Variant A won'
@@ -85,15 +86,38 @@ export default function VersionTimeline({ experiments }: Props) {
                   </div>
                 )}
 
-                {exp.versionUrl && (
-                  <a
-                    href={exp.versionUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-3 inline-block text-xs font-semibold text-cyan-400 hover:text-cyan-300"
-                  >
-                    Play this version &rarr;
-                  </a>
+                {/* Variant links for completed and running experiments */}
+                {(isComplete || isRunning) && (exp.variantAUrl || exp.variantBUrl) && (
+                  <div className="mt-3 flex flex-wrap gap-3">
+                    {exp.variantAUrl && (
+                      <a
+                        href={exp.variantAUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`text-xs font-semibold transition ${
+                          exp.winner === 'a'
+                            ? 'text-cyan-400 hover:text-cyan-300'
+                            : 'text-gray-500 hover:text-gray-400'
+                        }`}
+                      >
+                        {exp.winner === 'a' ? '★ ' : ''}Play Variant A &rarr;
+                      </a>
+                    )}
+                    {exp.variantBUrl && (
+                      <a
+                        href={exp.variantBUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`text-xs font-semibold transition ${
+                          exp.winner === 'b'
+                            ? 'text-violet-400 hover:text-violet-300'
+                            : 'text-gray-500 hover:text-gray-400'
+                        }`}
+                      >
+                        {exp.winner === 'b' ? '★ ' : ''}Play Variant B &rarr;
+                      </a>
+                    )}
+                  </div>
                 )}
               </div>
             </div>

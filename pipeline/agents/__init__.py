@@ -3,6 +3,7 @@ from .product_manager import run as propose_experiment
 from .ethics import run as review_ethics
 from .judge import run as judge_experiment
 from .engineer import run as implement_experiment
+from .engineer import merge_winner
 
 __all__ = [
     "analyze_data",
@@ -10,4 +11,5 @@ __all__ = [
     "review_ethics",
     "judge_experiment",
     "implement_experiment",
+    "merge_winner",
 ]
