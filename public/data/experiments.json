@@ -1,21 +1,42 @@
 {
   "goal": "Maximize average session value",
-  "currentWeek": 1,
+  "currentWeek": 2,
   "experiments": [
     {
       "week": 1,
-      "status": "running",
-      "hypothesis": "Baseline week — establishing initial metrics for the original Minesweeper game. No experiment is active; both variants point to the same V1 build.",
+      "status": "complete",
+      "hypothesis": "Baseline week \u2014 establishing initial metrics for the original Minesweeper game. No experiment is active; both variants point to the same V1 build.",
       "variantA": "Original Minesweeper (V1)",
       "variantB": "Original Minesweeper (V1)",
       "variantAUrl": "https://web-game-nine-lake.vercel.app/",
       "variantBUrl": "https://web-game-nine-lake.vercel.app/",
       "startDate": "2026-05-04",
       "endDate": "2026-05-10",
-      "metrics": { "a": null, "b": null },
-      "winner": null,
+      "metrics": {
+        "a": null,
+        "b": null
+      },
+      "winner": "a",
       "changelog": "Launched the original Minesweeper as V1 baseline.",
       "versionUrl": "https://web-game-nine-lake.vercel.app/"
+    },
+    {
+      "week": 2,
+      "status": "running",
+      "hypothesis": "Reducing the default game difficulty from a 16x16 grid with 40 mines to a 12x12 grid with 20 mines will increase average session value by at least 5% because easier games are likely to lead to a higher rate of games completed, which in turn could increase active play time per session and reduce frustration, especially for new players.",
+      "variantA": "The control group experiences the current default Minesweeper game settings: a 16x16 grid with 40 mines.",
+      "variantB": "The treatment group experiences a modified default Minesweeper game difficulty: a 12x12 grid with 20 mines.",
+      "variantAUrl": "https://web-game-git-experiment-week-2-variant-a-davidloesch1.vercel.app",
+      "variantBUrl": "https://web-game-git-experiment-week-2-variant-b-davidloesch1.vercel.app",
+      "startDate": "2026-05-06",
+      "endDate": "2026-05-12",
+      "metrics": {
+        "a": null,
+        "b": null
+      },
+      "winner": null,
+      "changelog": "Reducing the default game difficulty from a 16x16 grid with 40 mines to a 12x12 grid with 20 mines will increase average session value by at least 5% because easier games are likely to lead to a higher rate of games completed, which in turn could increase active play time per session and reduce frustration, especially for new players.",
+      "versionUrl": null
     }
   ]
 }
