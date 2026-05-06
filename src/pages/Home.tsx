@@ -2,13 +2,22 @@ import { Link } from 'react-router-dom'
 import Hero from '../components/Hero'
 import HowItWorks from '../components/HowItWorks'
 import ExperienceSelector from '../components/ExperienceSelector'
+import { useExperimentData } from '../hooks/useExperimentData'
 
 export default function Home() {
+  const { data } = useExperimentData()
+
+  const currentExperiment = data?.experiments.find(
+    (e) => e.week === data.currentWeek,
+  )
+
+  const totalWeeks = data?.currentWeek ?? 1
+
   return (
     <>
       <Hero />
       <HowItWorks />
-      <ExperienceSelector />
+      <ExperienceSelector currentExperiment={currentExperiment} />
 
       {/* Version timeline teaser */}
       <section className="border-t border-gray-800 py-20">
@@ -20,23 +29,30 @@ export default function Home() {
           </p>
 
           {/* Mini timeline preview */}
-          <div className="mx-auto mt-10 flex max-w-md items-center justify-between">
-            {[1, 4, 7, 10, 12].map((week, i) => (
-              <div key={week} className="flex flex-col items-center">
-                <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-full text-xs font-bold ${
-                    i === 4
-                      ? 'bg-cyan-500 text-gray-950'
-                      : 'border border-gray-700 text-gray-400'
-                  }`}
-                >
-                  {week}
+          <div className="mx-auto mt-10 flex max-w-md items-center justify-center gap-6">
+            {data?.experiments
+              .sort((a, b) => a.week - b.week)
+              .slice(-5)
+              .map((exp) => (
+                <div key={exp.week} className="flex flex-col items-center">
+                  <div
+                    className={`flex h-10 w-10 items-center justify-center rounded-full text-xs font-bold ${
+                      exp.week === totalWeeks
+                        ? 'bg-cyan-500 text-gray-950'
+                        : 'border border-gray-700 text-gray-400'
+                    }`}
+                  >
+                    {exp.week}
+                  </div>
+                  <span className="mt-2 text-[10px] text-gray-600">
+                    {exp.week === totalWeeks ? 'Current' : `Wk ${exp.week}`}
+                  </span>
                 </div>
-                <span className="mt-2 text-[10px] text-gray-600">
-                  {i === 4 ? 'Current' : `Wk ${week}`}
-                </span>
+              )) ?? (
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-cyan-500 text-xs font-bold text-gray-950">
+                1
               </div>
-            ))}
+            )}
           </div>
 
           <Link

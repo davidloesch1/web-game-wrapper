@@ -9,6 +9,8 @@ export interface Experiment {
   hypothesis: string
   variantA: string
   variantB: string
+  variantAUrl: string
+  variantBUrl: string
   startDate: string
   endDate: string
   metrics: ExperimentMetrics
