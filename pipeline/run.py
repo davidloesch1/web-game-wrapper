@@ -20,7 +20,7 @@ import logging
 import os
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 logging.basicConfig(
@@ -40,7 +40,9 @@ from agents import (
 )
 
 REPO_ROOT = Path(__file__).parent.parent
+PIPELINE_DIR = Path(__file__).parent
 EXPERIMENTS_JSON = REPO_ROOT / "public" / "data" / "experiments.json"
+EXCEPTION_REQUESTS_JSON = PIPELINE_DIR / "exception_requests.json"
 MAX_PROPOSAL_ATTEMPTS = 3
 
 
@@ -367,10 +369,31 @@ def publish_new_experiment(
     logger.info("Published week %d experiment to experiments.json", week)
 
 
+def load_exception_requests() -> list[dict]:
+    """Load existing exception requests."""
+    if not EXCEPTION_REQUESTS_JSON.exists():
+        return []
+    with open(EXCEPTION_REQUESTS_JSON) as f:
+        return json.load(f)
+
+
+def save_exception_request(request: dict, week: int):
+    """Append an exception request from the PM to the queue."""
+    requests = load_exception_requests()
+    request["week"] = week
+    request["timestamp"] = datetime.now(timezone.utc).isoformat()
+    request["status"] = "pending"
+    requests.append(request)
+    with open(EXCEPTION_REQUESTS_JSON, "w") as f:
+        json.dump(requests, f, indent=2)
+        f.write("\n")
+    logger.info("Filed exception request for week %d: %s", week, request.get("constraint", "N/A"))
+
+
 def git_commit_and_push(message: str):
-    """Commit and push the updated experiments.json."""
+    """Commit and push the updated experiments.json and exception requests."""
     subprocess.run(
-        ["git", "add", str(EXPERIMENTS_JSON)],
+        ["git", "add", str(EXPERIMENTS_JSON), str(EXCEPTION_REQUESTS_JSON)],
         cwd=REPO_ROOT, check=True,
     )
     subprocess.run(
@@ -381,7 +404,7 @@ def git_commit_and_push(message: str):
         ["git", "push"],
         cwd=REPO_ROOT, check=True,
     )
-    logger.info("Pushed experiments.json update to remote")
+    logger.info("Pushed experiments.json and exception requests to remote")
 
 
 def run_pipeline():
@@ -395,7 +418,6 @@ def run_pipeline():
     experiment_data = load_experiments()
     current_week = experiment_data["currentWeek"]
     next_week = current_week + 1
-    goal = experiment_data["goal"]
     experiment_history = experiment_data["experiments"]
 
     logger.info("Current week: %d → Running pipeline for week %d", current_week, next_week)
@@ -440,8 +462,31 @@ def run_pipeline():
     for attempt in range(1, MAX_PROPOSAL_ATTEMPTS + 1):
         logger.info("Proposal attempt %d/%d", attempt, MAX_PROPOSAL_ATTEMPTS)
 
-        proposal = propose_experiment(analysis, experiment_history, goal, feedback)
+        proposal = propose_experiment(analysis, experiment_history, feedback)
         logger.info("Hypothesis: %s", proposal.get("hypothesis", "N/A"))
+
+        # Handle exception requests from the PM (side-channel, non-blocking)
+        exception_req = proposal.pop("exception_request", None)
+        if exception_req and isinstance(exception_req, dict):
+            save_exception_request(exception_req, next_week)
+
+        # Validate change scope limits before sending to ethics/judge
+        files_changed = proposal.get("files_changed", [])
+        estimated_lines = proposal.get("estimated_lines_changed", 0)
+        change_category = proposal.get("change_category", "config")
+
+        if len(files_changed) > 1:
+            feedback = "Change scope violation: experiment modifies more than 1 file. Limit to a single file."
+            logger.warning("SCOPE REJECTED: %s", feedback)
+            continue
+        if estimated_lines > 50:
+            feedback = f"Change scope violation: estimated {estimated_lines} lines changed exceeds 50-line limit."
+            logger.warning("SCOPE REJECTED: %s", feedback)
+            continue
+        if change_category == "structural":
+            feedback = "Structural changes require an exception request. File one and propose a simpler experiment."
+            logger.warning("SCOPE REJECTED: %s", feedback)
+            continue
 
         ethics = review_ethics(proposal)
         if not ethics.get("approved", False):

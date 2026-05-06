@@ -1,5 +1,5 @@
 {
-  "goal": "Maximize average session duration",
+  "goal": "Maximize average session value",
   "currentWeek": 1,
   "experiments": [
     {

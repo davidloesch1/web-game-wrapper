@@ -26,16 +26,17 @@ A structured judgment containing:
 
 ## Scoring Criteria
 
-- **Goal alignment (40 points)**: Does this experiment have a clear, plausible path to improving the primary metric?
+- **Goal alignment (35 points)**: Does this experiment have a clear, plausible path to improving session value? Which factors does it target?
 - **Data grounding (20 points)**: Is the hypothesis supported by actual data from the analysis, or is it speculative?
 - **Isolation (15 points)**: Does the experiment test a single variable cleanly?
-- **Feasibility (15 points)**: Can this be implemented in one week with reasonable engineering effort?
-- **Risk/reward (10 points)**: Is the potential upside worth the potential downside?
+- **Change scope compliance (15 points)**: Does it stay within the Source of Truth change scope limits (1 file, 50 lines, appropriate category)?
+- **Risk/reward (15 points)**: Is the potential upside worth the potential downside?
 
 ## Guidelines
 
 - Be rigorous but constructive. A rejection should always include clear guidance on how to improve.
 - Check the experiment history — reject proposals that are too similar to past losers.
-- The site owner's constraints are non-negotiable. Any violation is an automatic rejection regardless of score.
+- The site owner's constraints and change scope limits are non-negotiable. Any violation is an automatic rejection regardless of score.
+- Check `files_changed`, `estimated_lines_changed`, and `change_category` against the Source of Truth limits.
 - Don't penalize ambition — big swings are fine if they're grounded in data and don't violate constraints.
 - When in doubt, ask: "Would the site owner approve this if they were reviewing it themselves?"
