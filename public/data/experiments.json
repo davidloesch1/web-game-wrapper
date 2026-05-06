@@ -26,8 +26,8 @@
       "hypothesis": "Reducing the default game difficulty from a 16x16 grid with 40 mines to a 12x12 grid with 20 mines will increase average session value by at least 5% because easier games are likely to lead to a higher rate of games completed, which in turn could increase active play time per session and reduce frustration, especially for new players.",
       "variantA": "The control group experiences the current default Minesweeper game settings: a 16x16 grid with 40 mines.",
       "variantB": "The treatment group experiences a modified default Minesweeper game difficulty: a 12x12 grid with 20 mines.",
-      "variantAUrl": "https://web-game-git-experiment-week-2-variant-a-davidloesch1.vercel.app",
-      "variantBUrl": "https://web-game-git-experiment-week-2-variant-b-davidloesch1.vercel.app",
+      "variantAUrl": "https://web-game-n1z9c0dz1-david-loeschs-projects.vercel.app",
+      "variantBUrl": "https://web-game-gp1t328q9-david-loeschs-projects.vercel.app",
       "startDate": "2026-05-06",
       "endDate": "2026-05-12",
       "metrics": {

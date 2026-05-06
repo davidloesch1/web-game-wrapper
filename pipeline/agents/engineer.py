@@ -5,6 +5,8 @@ import logging
 import os
 import shutil
 import subprocess
+import time
+import urllib.request
 
 logger = logging.getLogger(__name__)
 
@@ -84,15 +86,16 @@ def run(proposal: dict, week: int, work_dir: str = "/tmp/game-experiment") -> di
     _run_git(["commit", "-m", f"Week {week} experiment: variant B (treatment)"], cwd=work_dir)
     _run_git(["push", "-u", "origin", branch_b], cwd=work_dir)
 
-    # Vercel auto-deploys branches as preview deployments
-    variant_a_url = os.environ.get(
-        "VARIANT_A_URL_OVERRIDE",
-        f"https://web-game-git-{branch_a.replace('/', '-')}-davidloesch1.vercel.app",
-    )
-    variant_b_url = os.environ.get(
-        "VARIANT_B_URL_OVERRIDE",
-        f"https://web-game-git-{branch_b.replace('/', '-')}-davidloesch1.vercel.app",
-    )
+    # Get the commit SHAs so we can match them to Vercel deployments
+    sha_a = _run_git(["rev-parse", "HEAD"], cwd=work_dir).strip()
+    _run_git(["checkout", branch_a], cwd=work_dir)
+    sha_a = _run_git(["rev-parse", "HEAD"], cwd=work_dir).strip()
+    _run_git(["checkout", branch_b], cwd=work_dir)
+    sha_b = _run_git(["rev-parse", "HEAD"], cwd=work_dir).strip()
+
+    # Discover real Vercel preview URLs from GitHub deployments API
+    variant_a_url = _discover_deployment_url(sha_a, branch_a)
+    variant_b_url = _discover_deployment_url(sha_b, branch_b)
 
     logger.info("Variant A URL: %s", variant_a_url)
     logger.info("Variant B URL: %s", variant_b_url)
@@ -103,6 +106,68 @@ def run(proposal: dict, week: int, work_dir: str = "/tmp/game-experiment") -> di
         "variant_a_url": variant_a_url,
         "variant_b_url": variant_b_url,
     }
+
+
+def _discover_deployment_url(
+    commit_sha: str,
+    branch: str,
+    repo: str = "davidloesch1/web-game",
+    max_wait: int = 60,
+    poll_interval: int = 10,
+) -> str:
+    """Poll GitHub's deployments API to find the Vercel preview URL for a commit.
+
+    Vercel creates a GitHub deployment when it deploys a branch. We poll
+    until the deployment appears and has a success status with a target_url.
+
+    Falls back to a constructed URL if the API doesn't return one in time.
+    """
+    token = os.environ.get("GAME_REPO_PAT") or os.environ.get("GITHUB_TOKEN", "")
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "evolution-pipeline",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    # Extract token from GAME_REPO_URL if not set separately
+    if not token:
+        repo_url = os.environ.get("GAME_REPO_URL", "")
+        if "x-access-token:" in repo_url:
+            token = repo_url.split("x-access-token:")[1].split("@")[0]
+            headers["Authorization"] = f"Bearer {token}"
+
+    deployments_url = f"https://api.github.com/repos/{repo}/deployments?sha={commit_sha}&per_page=5"
+
+    waited = 0
+    while waited < max_wait:
+        try:
+            req = urllib.request.Request(deployments_url, headers=headers)
+            with urllib.request.urlopen(req) as resp:
+                deployments = json.loads(resp.read())
+
+            for dep in deployments:
+                statuses_url = dep.get("statuses_url", "")
+                if not statuses_url:
+                    continue
+                req2 = urllib.request.Request(statuses_url, headers=headers)
+                with urllib.request.urlopen(req2) as resp2:
+                    statuses = json.loads(resp2.read())
+                for status in statuses:
+                    if status.get("state") == "success" and status.get("target_url"):
+                        return status["target_url"]
+        except Exception as e:
+            logger.warning("Deployment API poll failed: %s", e)
+
+        if waited < max_wait:
+            logger.info("Waiting for Vercel deployment of %s... (%ds)", branch, waited)
+            time.sleep(poll_interval)
+            waited += poll_interval
+
+    # Fallback: construct a URL (may not work but is better than nothing)
+    fallback = f"https://web-game-git-{branch.replace('/', '-')}-davidloesch1.vercel.app"
+    logger.warning("Could not discover deployment URL for %s — using fallback: %s", branch, fallback)
+    return fallback
 
 
 def _write_experiment_marker(work_dir: str, proposal: dict, week: int, variant: str):
