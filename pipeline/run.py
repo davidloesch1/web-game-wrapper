@@ -59,7 +59,6 @@ def save_experiments(data: dict):
 
 BQ_PROJECT = os.environ.get("BQ_PROJECT", "minesweeper-495519")
 BQ_DATASET = os.environ.get("BQ_DATASET", "fs_data_destination")
-GAME_HOST = "web-game-nine-lake.vercel.app"
 
 
 def _get_bq_client():
@@ -80,14 +79,18 @@ def _bq_table(name: str) -> str:
     return f"`{BQ_PROJECT}.{BQ_DATASET}.{name}`"
 
 
-def pull_bigquery_data(week_start: str, week_end: str) -> list[dict]:
+def pull_bigquery_data(week_start: str, week_end: str, experiment_week: int | None = None) -> list[dict]:
     """Pull session data from BigQuery for the given date range.
 
-    Queries FullStory's Ready to Analyze Views schema, scoped to
-    game sessions only (filters by game host, excludes wrapper).
+    Queries FullStory's Ready to Analyze Views schema. Uses the
+    page_properties table to identify game sessions by experiment_week
+    and experiment_variant (set by the game via experiment.json).
+
+    For baseline weeks (no experiment running), falls back to filtering
+    by the game's production host.
 
     Returns a list of session-level dicts combining page view duration,
-    click behavior, and fingerprint data.
+    click behavior, fingerprint data, and experiment variant assignment.
     """
     client = _get_bq_client()
     if not client:
@@ -96,72 +99,137 @@ def pull_bigquery_data(week_start: str, week_end: str) -> list[dict]:
 
     from google.cloud import bigquery
 
-    # Session-level metrics from page_views, scoped to the game host.
-    # Minesweeper is a single-page app so each page_view ≈ one play session.
-    session_query = f"""
-    SELECT
-      pv.session_id,
-      pv.user_id,
-      pv.view_id,
-      pv.event_time,
-      pv.duration_millis,
-      pv.active_duration_millis,
-      pv.inactive_duration_millis,
-      pv.max_scroll_depth,
-      sp.url_host,
-      sp.url_path,
-      sp.url_query,
-      sp.user_agent_browser,
-      sp.user_agent_device,
-      sp.user_agent_operating_system,
-      sp.location_country,
-      sp.location_region
-    FROM {_bq_table('page_views')} pv
-    LEFT JOIN {_bq_table('source_properties')} sp
-      ON pv.event_id = sp.event_id
-    WHERE pv.event_time BETWEEN @start AND @end
-      AND sp.url_host = @game_host
-    ORDER BY pv.event_time
-    """
+    # When an experiment was running, use page_properties to identify
+    # game sessions and their variant assignment. This works regardless
+    # of which Vercel preview URL the game was deployed to.
+    if experiment_week is not None:
+        session_query = f"""
+        SELECT
+          pv.session_id,
+          pv.user_id,
+          pv.view_id,
+          pv.event_time,
+          pv.duration_millis,
+          pv.active_duration_millis,
+          pv.inactive_duration_millis,
+          pv.max_scroll_depth,
+          pp.experiment_week,
+          pp.experiment_variant,
+          sp.url_host,
+          sp.user_agent_browser,
+          sp.user_agent_device,
+          sp.user_agent_operating_system,
+          sp.location_country,
+          sp.location_region
+        FROM {_bq_table('page_views')} pv
+        INNER JOIN {_bq_table('page_properties')} pp
+          ON pv.event_id = pp.event_id
+        LEFT JOIN {_bq_table('source_properties')} sp
+          ON pv.event_id = sp.event_id
+        WHERE pv.event_time BETWEEN @start AND @end
+          AND pp.experiment_week = @experiment_week
+        ORDER BY pv.event_time
+        """
 
-    # Click behavior per session — rage clicks, dead clicks, totals
-    clicks_query = f"""
-    SELECT
-      c.session_id,
-      COUNT(*) AS total_clicks,
-      SUM(c.fs_rage_count) AS total_rage_clicks,
-      SUM(c.fs_dead_count) AS total_dead_clicks
-    FROM {_bq_table('clicks')} c
-    LEFT JOIN {_bq_table('source_properties')} sp
-      ON c.event_id = sp.event_id
-    WHERE c.event_time BETWEEN @start AND @end
-      AND sp.url_host = @game_host
-    GROUP BY c.session_id
-    """
+        clicks_query = f"""
+        SELECT
+          c.session_id,
+          COUNT(*) AS total_clicks,
+          SUM(c.fs_rage_count) AS total_rage_clicks,
+          SUM(c.fs_dead_count) AS total_dead_clicks
+        FROM {_bq_table('clicks')} c
+        INNER JOIN {_bq_table('page_properties')} pp
+          ON c.event_id = pp.event_id
+        WHERE c.event_time BETWEEN @start AND @end
+          AND pp.experiment_week = @experiment_week
+        GROUP BY c.session_id
+        """
 
-    # Fingerprint custom events from the encoder
-    fingerprint_query = f"""
-    SELECT
-      ce.session_id,
-      ce.user_id,
-      ce.event_name,
-      ce.event_properties,
-      ce.event_time
-    FROM {_bq_table('custom_events')} ce
-    LEFT JOIN {_bq_table('source_properties')} sp
-      ON ce.event_id = sp.event_id
-    WHERE ce.event_time BETWEEN @start AND @end
-      AND sp.url_host = @game_host
-    ORDER BY ce.event_time
-    """
+        fingerprint_query = f"""
+        SELECT
+          ce.session_id,
+          ce.user_id,
+          ce.event_name,
+          ce.event_properties,
+          ce.event_time
+        FROM {_bq_table('custom_events')} ce
+        INNER JOIN {_bq_table('page_properties')} pp
+          ON ce.event_id = pp.event_id
+        WHERE ce.event_time BETWEEN @start AND @end
+          AND pp.experiment_week = @experiment_week
+        ORDER BY ce.event_time
+        """
 
-    job_config = bigquery.QueryJobConfig(
-        query_parameters=[
-            bigquery.ScalarQueryParameter("start", "TIMESTAMP", week_start),
-            bigquery.ScalarQueryParameter("end", "TIMESTAMP", week_end),
-            bigquery.ScalarQueryParameter("game_host", "STRING", GAME_HOST),
-        ]
-    )
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("start", "TIMESTAMP", week_start),
+                bigquery.ScalarQueryParameter("end", "TIMESTAMP", week_end),
+                bigquery.ScalarQueryParameter("experiment_week", "INT64", experiment_week),
+            ]
+        )
+    else:
+        # Baseline / no experiment — fall back to production host filtering
+        session_query = f"""
+        SELECT
+          pv.session_id,
+          pv.user_id,
+          pv.view_id,
+          pv.event_time,
+          pv.duration_millis,
+          pv.active_duration_millis,
+          pv.inactive_duration_millis,
+          pv.max_scroll_depth,
+          CAST(NULL AS INT64) AS experiment_week,
+          CAST(NULL AS STRING) AS experiment_variant,
+          sp.url_host,
+          sp.user_agent_browser,
+          sp.user_agent_device,
+          sp.user_agent_operating_system,
+          sp.location_country,
+          sp.location_region
+        FROM {_bq_table('page_views')} pv
+        LEFT JOIN {_bq_table('source_properties')} sp
+          ON pv.event_id = sp.event_id
+        WHERE pv.event_time BETWEEN @start AND @end
+          AND sp.url_host = 'web-game-nine-lake.vercel.app'
+        ORDER BY pv.event_time
+        """
+
+        clicks_query = f"""
+        SELECT
+          c.session_id,
+          COUNT(*) AS total_clicks,
+          SUM(c.fs_rage_count) AS total_rage_clicks,
+          SUM(c.fs_dead_count) AS total_dead_clicks
+        FROM {_bq_table('clicks')} c
+        LEFT JOIN {_bq_table('source_properties')} sp
+          ON c.event_id = sp.event_id
+        WHERE c.event_time BETWEEN @start AND @end
+          AND sp.url_host = 'web-game-nine-lake.vercel.app'
+        GROUP BY c.session_id
+        """
+
+        fingerprint_query = f"""
+        SELECT
+          ce.session_id,
+          ce.user_id,
+          ce.event_name,
+          ce.event_properties,
+          ce.event_time
+        FROM {_bq_table('custom_events')} ce
+        LEFT JOIN {_bq_table('source_properties')} sp
+          ON ce.event_id = sp.event_id
+        WHERE ce.event_time BETWEEN @start AND @end
+          AND sp.url_host = 'web-game-nine-lake.vercel.app'
+        ORDER BY ce.event_time
+        """
+
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("start", "TIMESTAMP", week_start),
+                bigquery.ScalarQueryParameter("end", "TIMESTAMP", week_end),
+            ]
+        )
 
     logger.info("Querying page_views for game sessions...")
     sessions = [dict(row) for row in client.query(session_query, job_config=job_config)]
@@ -336,9 +404,11 @@ def run_pipeline():
     logger.info("--- Stage 1: Pull BigQuery data ---")
     running_experiment = get_running_experiment(experiment_data)
     if running_experiment:
+        exp_week = running_experiment.get("week")
         session_data = pull_bigquery_data(
             running_experiment["startDate"],
             running_experiment["endDate"],
+            experiment_week=exp_week if exp_week != 1 else None,
         )
         logger.info("Pulled %d sessions from BigQuery", len(session_data))
     else:
