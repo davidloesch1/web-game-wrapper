@@ -446,9 +446,11 @@ def run_pipeline():
     logger.info("--- Stage 3: Close previous experiment ---")
     if running_experiment:
         winner = close_experiment(experiment_data, analysis)
-        if winner:
+        if winner and current_week > 1:
             logger.info("Winner: variant %s — merging to main", winner.upper())
             merge_winner(winner, current_week)
+        elif winner and current_week == 1:
+            logger.info("Baseline week — skipping merge (no experiment branches exist)")
         else:
             logger.info("No winner determined — keeping current main")
     else:
