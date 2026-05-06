@@ -7,7 +7,7 @@ from pathlib import Path
 import google.generativeai as genai
 
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
-MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 
 def configure():
