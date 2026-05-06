@@ -37,8 +37,8 @@ jobs:
       - name: Run evolution pipeline
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          BIGQUERY_CREDENTIALS: ${{ secrets.BIGQUERY_CREDENTIALS }}
-          GAME_REPO_URL: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/davidloesch1/web-game.git
+          BIGQUERY_CREDENTIALS: ${{ secrets.BIG_QUERY_CREDENTIALS }}
+          GAME_REPO_URL: https://x-access-token:${{ secrets.GAME_REPO_PAT }}@github.com/davidloesch1/web-game.git
         run: python run.py
 
       - name: Upload pipeline logs
