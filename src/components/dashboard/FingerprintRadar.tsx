@@ -16,10 +16,10 @@ interface Props {
 }
 
 const DIMENSION_GROUPS = [
-  { start: 0, end: 7, label: 'Timing & Pace' },
-  { start: 8, end: 15, label: 'Click Patterns' },
-  { start: 16, end: 23, label: 'Movement' },
-  { start: 24, end: 31, label: 'Interaction' },
+  { start: 0, end: 7, label: 'Dim 0–7' },
+  { start: 8, end: 15, label: 'Dim 8–15' },
+  { start: 16, end: 23, label: 'Dim 16–23' },
+  { start: 24, end: 31, label: 'Dim 24–31' },
 ]
 
 export default function FingerprintRadar({ vector, index, timestamp }: Props) {

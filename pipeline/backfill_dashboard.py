@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
 )
 logger = logging.getLogger("backfill")
@@ -339,7 +339,7 @@ def main():
             qualitative_report.get("understood_mechanics_pct", "N/A"),
         )
     except Exception as e:
-        logger.warning("Summary generation failed (non-fatal): %s", e)
+        logger.error("Summary generation failed (non-fatal): %s", e, exc_info=True)
 
     # Build summary lookup by session_id
     summary_by_session: dict[str, dict] = {}

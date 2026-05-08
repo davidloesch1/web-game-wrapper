@@ -33,6 +33,8 @@ def _get_api_key() -> str | None:
     key = os.environ.get("FULLSTORY_API_KEY")
     if not key:
         logger.warning("FULLSTORY_API_KEY not set — session summaries disabled")
+    else:
+        logger.info("FULLSTORY_API_KEY is set (length %d)", len(key))
     return key
 
 
@@ -48,19 +50,22 @@ def _fs_request(path: str, api_key: str, method: str = "GET", body: dict | None 
     data = json.dumps(body).encode() if body else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
 
+    logger.debug("FullStory API request: %s %s", method, url)
+
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             raw = resp.read().decode()
+            logger.debug("FullStory API response (%d): %s", resp.status, raw[:200])
             try:
                 return json.loads(raw)
             except json.JSONDecodeError:
                 return raw
     except urllib.error.HTTPError as e:
         error_body = e.read().decode() if e.readable() else ""
-        logger.warning("FullStory API %s %s returned %d: %s", method, path, e.code, error_body)
+        logger.error("FullStory API %s %s returned %d: %s", method, url, e.code, error_body[:500])
         return None
     except Exception as e:
-        logger.warning("FullStory API request failed: %s", e)
+        logger.error("FullStory API request to %s failed: %s", url, e)
         return None
 
 
@@ -88,14 +93,10 @@ def _build_api_session_id(session: dict) -> str | None:
 def generate_summary(session_id: str, api_key: str, session: dict | None = None) -> dict | None:
     """Generate an AI summary for a single session using the prompt profile.
 
-    Args:
-        session_id: FullStory session ID (may need device_id prefix).
-        api_key: FullStory API key.
-        session: Full session dict from BigQuery (used to build
-            the proper device_id:session_id if needed).
+    Tries the FullStory Generate Summary GET endpoint. The endpoint format is:
+    GET /v2/sessions/{session_id}/summaries/{profile_id}
 
-    Returns:
-        Structured summary dict from FullStory's AI, or None on failure.
+    The session_id must be URL-encoded (: becomes %3A).
     """
     if session:
         encoded_id = _build_api_session_id(session)
@@ -106,12 +107,18 @@ def generate_summary(session_id: str, api_key: str, session: dict | None = None)
         logger.warning("Could not build API session ID for %s", session_id)
         return None
 
+    logger.info("  Requesting summary for session_id=%s (encoded=%s)", session_id, encoded_id)
+
     path = f"/v2/sessions/{encoded_id}/summaries/{PROMPT_PROFILE_ID}"
     result = _fs_request(path, api_key)
 
     if result is None:
-        logger.warning("Failed to generate summary for session %s", session_id)
+        logger.warning("  Summary request failed for session %s", session_id)
         return None
+
+    logger.info("  Summary response type=%s keys=%s",
+                type(result).__name__,
+                list(result.keys()) if isinstance(result, dict) else "N/A")
 
     if isinstance(result, dict) and "response" in result:
         return result["response"]

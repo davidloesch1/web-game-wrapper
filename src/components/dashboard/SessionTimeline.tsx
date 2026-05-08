@@ -38,10 +38,19 @@ function parseFingerprintVector(fp: FingerprintEvent): number[] {
   return vec.length === 32 ? vec : []
 }
 
+const GAME_EVENT_STYLES: Record<string, { icon: string; color: string; label: string }> = {
+  'Game Started': { icon: '🎮', color: 'text-green-400', label: 'Game Started' },
+  'Game Completed': { icon: '🏆', color: 'text-yellow-400', label: 'Game Completed' },
+  'Experiment Variant Selected': { icon: '🔬', color: 'text-purple-400', label: 'Variant Selected' },
+}
+
 export default function SessionTimeline({ session, onBack }: Props) {
   const [selectedFpIndex, setSelectedFpIndex] = useState<number | null>(null)
   const summary = session.summary
-  const fps = session.fingerprint_events || []
+  const allEvents = session.fingerprint_events || []
+
+  const fps = allEvents.filter((e) => e.event_name === 'Fingerprint Generated')
+  const gameEvents = allEvents.filter((e) => e.event_name !== 'Fingerprint Generated' && e.event_name !== 'Nexus label')
 
   const sessionStart = new Date(session.event_time).getTime()
   const durationMs = session.duration_millis || session.active_duration_millis || 60000
@@ -121,18 +130,21 @@ export default function SessionTimeline({ session, onBack }: Props) {
         </div>
       )}
 
-      {/* Fingerprint Timeline */}
+      {/* Session Timeline */}
       <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-5">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">
-          Behavioral Fingerprint Timeline
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+          Session Timeline
         </h3>
+        <p className="text-[10px] text-gray-600 mb-4">
+          Fingerprint captures and game events over time
+        </p>
 
-        {fps.length === 0 ? (
-          <p className="text-xs text-gray-600">No fingerprint events recorded for this session</p>
+        {fps.length === 0 && gameEvents.length === 0 ? (
+          <p className="text-xs text-gray-600">No events recorded for this session</p>
         ) : (
           <div className="relative">
             {/* Timeline bar */}
-            <div className="relative h-16 mx-4">
+            <div className="relative h-20 mx-4">
               {/* Base line */}
               <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-gray-700 -translate-y-1/2" />
 
@@ -142,13 +154,43 @@ export default function SessionTimeline({ session, onBack }: Props) {
                   className="absolute top-0 bottom-0 w-0.5 bg-green-500/50"
                   style={{ left: `${learningOnsetPct}%` }}
                 >
-                  <div className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] text-green-400 whitespace-nowrap">
+                  <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] text-green-400 whitespace-nowrap">
                     learned ({learningOnset}s)
                   </div>
                 </div>
               )}
 
-              {/* Fingerprint dots */}
+              {/* Game event markers (above the line) */}
+              {gameEvents.map((event, i) => {
+                const eventTime = new Date(event.event_time).getTime()
+                const pct = Math.min(Math.max((eventTime - sessionStart) / durationMs, 0), 1) * 100
+                const style = GAME_EVENT_STYLES[event.event_name] || { icon: '📌', color: 'text-gray-400', label: event.event_name }
+
+                let subtitle = ''
+                const props = typeof event.event_properties === 'string'
+                  ? (() => { try { return JSON.parse(event.event_properties) } catch { return {} } })()
+                  : event.event_properties || {}
+                if (event.event_name === 'Game Completed') {
+                  subtitle = props.outcome_str === 'win' ? ' (win)' : props.outcome_str === 'loss' ? ' (loss)' : ''
+                }
+
+                return (
+                  <div
+                    key={`game-${i}`}
+                    className="absolute -translate-x-1/2 flex flex-col items-center"
+                    style={{ left: `${pct}%`, top: '0px' }}
+                    title={`${style.label}${subtitle} at ${Math.round((eventTime - sessionStart) / 1000)}s`}
+                  >
+                    <span className="text-sm">{style.icon}</span>
+                    <span className={`text-[8px] ${style.color} whitespace-nowrap`}>
+                      {style.label}{subtitle}
+                    </span>
+                    <div className={`h-3 w-0.5 ${style.color.replace('text-', 'bg-')} opacity-30`} />
+                  </div>
+                )
+              })}
+
+              {/* Fingerprint dots (on the line) */}
               {fps.map((fp, i) => {
                 const fpTime = new Date(fp.event_time).getTime()
                 const pct = Math.min(Math.max((fpTime - sessionStart) / durationMs, 0), 1) * 100
@@ -156,12 +198,12 @@ export default function SessionTimeline({ session, onBack }: Props) {
 
                 return (
                   <button
-                    key={i}
+                    key={`fp-${i}`}
                     onClick={() => setSelectedFpIndex(isSelected ? null : i)}
                     className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-all cursor-pointer
                       ${isSelected
                         ? 'h-5 w-5 bg-cyan-400 ring-2 ring-cyan-400/30 z-10'
-                        : 'h-3.5 w-3.5 bg-cyan-600 hover:bg-cyan-500 hover:scale-125'
+                        : 'h-3 w-3 bg-cyan-600 hover:bg-cyan-500 hover:scale-125'
                       }`}
                     style={{ left: `${pct}%` }}
                     title={`Fingerprint ${i + 1} at ${Math.round((fpTime - sessionStart) / 1000)}s`}
@@ -175,6 +217,20 @@ export default function SessionTimeline({ session, onBack }: Props) {
               <span>0s</span>
               <span>{Math.round(durationMs / 2000)}s</span>
               <span>{Math.round(durationMs / 1000)}s</span>
+            </div>
+
+            {/* Legend */}
+            <div className="flex gap-4 mx-4 mt-2 text-[10px] text-gray-500">
+              <div className="flex items-center gap-1">
+                <span className="inline-block h-2 w-2 rounded-full bg-cyan-600" />
+                Fingerprint
+              </div>
+              {Object.entries(GAME_EVENT_STYLES).map(([name, style]) => (
+                <div key={name} className="flex items-center gap-1">
+                  <span>{style.icon}</span>
+                  {style.label}
+                </div>
+              ))}
             </div>
           </div>
         )}
