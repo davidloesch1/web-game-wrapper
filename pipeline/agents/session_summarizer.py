@@ -109,7 +109,7 @@ def generate_summary(session_id: str, api_key: str, session: dict | None = None)
 
     logger.info("  Requesting summary for session_id=%s (encoded=%s)", session_id, encoded_id)
 
-    path = f"/v2/sessions/{encoded_id}/summaries/{PROMPT_PROFILE_ID}"
+    path = f"/v2/sessions/{encoded_id}/summary?config_profile={PROMPT_PROFILE_ID}"
     result = _fs_request(path, api_key)
 
     if result is None:
