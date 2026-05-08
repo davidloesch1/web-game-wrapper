@@ -19,9 +19,9 @@ WHAT IT DOES:
        - Engineer: what branches were created, what code was changed
        - Exception requests filed (if any)
     2. Verifies implementation integrity:
-       - Checks that experiment branches match the PM's specification
-       - Verifies that variant A is identical to main (control integrity)
-       - Confirms both Vercel deployments are live and serving
+       - Checks that the variant-B branch matches the PM's specification
+       - Verifies that main (variant A) has the correct experiment.json
+       - Confirms the variant-B Vercel preview deployment is live
     3. Validates constraint compliance:
        - Confirms change scope limits were respected
        - Checks that no constraints were bypassed

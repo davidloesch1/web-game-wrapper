@@ -8,12 +8,13 @@ Lifecycle per week:
   1b. Generate AI session summaries via FullStory (qualitative)
   2.  Data Scientist analyzes both quantitative + qualitative data
   3.  Close previous experiment (determine winner from analysis)
-  4.  Merge winning variant into main (game production site updates)
+  4.  Merge winner into main if B won; tag + bump experiment.json either way
   5.  PM proposes next experiment, Ethics + Judge approve
-  6.  Engineering agent creates two new variant branches
+  6.  Engineering agent creates variant-B challenger branch
   7.  Update experiments.json and push (wrapper site updates)
 
-All experiment branches are kept permanently as playable archives.
+Main is always variant A (control).  Variant-B branches are kept
+permanently as playable archives via Vercel preview URLs.
 """
 
 import json
@@ -465,13 +466,13 @@ def run_pipeline():
     analysis = analyze_data(session_data, experiment_history, qualitative_report)
     logger.info("Analysis summary: %s", analysis.get("summary", "N/A"))
 
-    # --- Stage 3: Close previous experiment and merge winner ---
+    # --- Stage 3: Close previous experiment and advance main ---
     logger.info("--- Stage 3: Close previous experiment ---")
     if running_experiment:
         winner = close_experiment(experiment_data, analysis)
         if winner and current_week > 1:
-            logger.info("Winner: variant %s — merging to main", winner.upper())
-            merge_winner(winner, current_week)
+            logger.info("Winner: variant %s — advancing main for week %d", winner.upper(), next_week)
+            merge_winner(winner, current_week, next_week)
         elif winner and current_week == 1:
             logger.info("Baseline week — skipping merge (no experiment branches exist)")
         else:
@@ -545,10 +546,10 @@ def run_pipeline():
         sys.exit(0)
 
     # --- Stage 5: Engineering implementation ---
-    logger.info("--- Stage 5: Engineering implementation ---")
+    logger.info("--- Stage 5: Engineering implementation (variant B only) ---")
     deployment = implement_experiment(approved_proposal, next_week)
     logger.info(
-        "Deployed: A=%s, B=%s",
+        "Deployed: A=%s (main), B=%s",
         deployment.get("variant_a_url"),
         deployment.get("variant_b_url"),
     )

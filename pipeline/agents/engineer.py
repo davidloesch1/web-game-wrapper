@@ -1,4 +1,13 @@
-"""Engineering agent — implements approved experiments via git branches."""
+"""Engineering agent — implements approved experiments via git branches.
+
+Strategy: main is always Variant A (the control).  Each week the engineer
+creates a single challenger branch (variant B).  When a winner is decided:
+  - B wins → merge B into main, tag the pre-merge state, bump experiment.json
+  - A wins → main stays, just bump experiment.json for the next week
+
+This keeps every variant-B branch alive as a permanent, playable archive
+via its Vercel preview URL.
+"""
 
 import json
 import logging
@@ -15,42 +24,64 @@ GAME_REPO_URL = os.environ.get(
     "https://github.com/davidloesch1/web-game.git",
 )
 
+MAIN_PRODUCTION_URL = "https://web-game-nine-lake.vercel.app/"
 
-def merge_winner(winner: str, week: int, work_dir: str = "/tmp/game-merge") -> None:
-    """Merge the winning variant branch into main.
 
-    The losing branch is kept alive for historical reference —
-    both variants remain playable via their Vercel preview URLs.
+def merge_winner(winner: str, week: int, next_week: int, work_dir: str = "/tmp/game-merge") -> None:
+    """Close the current experiment and prepare main for the next week.
 
-    Args:
-        winner: "a" or "b"
-        week: The week number of the completed experiment.
-        work_dir: Temporary directory to clone into.
+    If B won, merge the experiment branch into main.
+    Either way, update experiment.json on main so every session played
+    on the production site is tagged as variant A for the upcoming week.
+
+    The losing/old branch is kept permanently for historical reference.
     """
-    winning_branch = f"experiment/week-{week}-variant-{winner}"
-    logger.info("Merging winner %s into main", winning_branch)
-
     if os.path.exists(work_dir):
         shutil.rmtree(work_dir)
 
     _run_git(["clone", GAME_REPO_URL, work_dir])
     _run_git(["checkout", "main"], cwd=work_dir)
+
+    # Tag the current main so we have a playable snapshot of this week's control
+    tag_name = f"week-{week}-control"
+    try:
+        _run_git(["tag", tag_name], cwd=work_dir)
+        _run_git(["push", "origin", tag_name], cwd=work_dir)
+        logger.info("Tagged main as %s", tag_name)
+    except RuntimeError:
+        logger.warning("Tag %s already exists — skipping", tag_name)
+
+    if winner == "b":
+        winning_branch = f"experiment/week-{week}-variant-b"
+        logger.info("Merging winner %s into main", winning_branch)
+        _run_git(
+            ["merge", f"origin/{winning_branch}", "--no-ff",
+             "-m", f"Week {week}: advance winning variant B to main"],
+            cwd=work_dir,
+        )
+
+    # Update experiment.json on main for the next week (variant A / control)
+    _update_main_experiment_marker(work_dir, next_week)
+    _run_git(["add", "experiment.json"], cwd=work_dir)
     _run_git(
-        ["merge", f"origin/{winning_branch}", "--no-ff",
-         "-m", f"Week {week}: advance winning variant {winner.upper()} to main"],
+        ["commit", "--allow-empty", "-m",
+         f"Week {next_week}: set experiment.json for variant A (control)"],
         cwd=work_dir,
     )
     _run_git(["push", "origin", "main"], cwd=work_dir)
 
-    logger.info("Main updated with week %d winner (variant %s)", week, winner.upper())
+    logger.info(
+        "Main updated — week %d winner: %s, experiment.json set for week %d",
+        week, winner.upper(), next_week,
+    )
 
 
 def run(proposal: dict, week: int, work_dir: str = "/tmp/game-experiment") -> dict:
-    """Implement an approved experiment by creating variant branches.
+    """Implement an experiment by creating the variant-B challenger branch.
 
-    Creates two branches from main — variant A (control, identical to
-    main) and variant B (treatment, with experiment changes applied).
-    Both branches are kept permanently for historical reference.
+    Main is always variant A (control).  This function creates a single
+    branch from main with the experimental changes applied, plus the
+    experiment.json marker identifying it as variant B.
 
     Args:
         proposal: Approved experiment proposal.
@@ -58,9 +89,8 @@ def run(proposal: dict, week: int, work_dir: str = "/tmp/game-experiment") -> di
         work_dir: Temporary directory to clone the game repo into.
 
     Returns:
-        Dict with branch names and Vercel preview URLs.
+        Dict with branch name and Vercel preview URLs.
     """
-    branch_a = f"experiment/week-{week}-variant-a"
     branch_b = f"experiment/week-{week}-variant-b"
 
     if os.path.exists(work_dir):
@@ -69,43 +99,40 @@ def run(proposal: dict, week: int, work_dir: str = "/tmp/game-experiment") -> di
     logger.info("Cloning game repo to %s", work_dir)
     _run_git(["clone", GAME_REPO_URL, work_dir])
 
-    # Variant A — control branch (identical to main)
-    logger.info("Creating control branch: %s", branch_a)
-    _run_git(["checkout", "-b", branch_a], cwd=work_dir)
-    _write_experiment_marker(work_dir, proposal, week, "a")
-    _run_git(["add", "."], cwd=work_dir)
-    _run_git(["commit", "-m", f"Week {week} experiment: variant A (control)"], cwd=work_dir)
-    _run_git(["push", "-u", "origin", branch_a], cwd=work_dir)
-
-    # Variant B — treatment branch
+    # Create variant B — the challenger branch
     logger.info("Creating treatment branch: %s", branch_b)
-    _run_git(["checkout", "main"], cwd=work_dir)
     _run_git(["checkout", "-b", branch_b], cwd=work_dir)
     _write_experiment_marker(work_dir, proposal, week, "b")
     _run_git(["add", "."], cwd=work_dir)
     _run_git(["commit", "-m", f"Week {week} experiment: variant B (treatment)"], cwd=work_dir)
     _run_git(["push", "-u", "origin", branch_b], cwd=work_dir)
 
-    # Get the commit SHAs so we can match them to Vercel deployments
-    sha_a = _run_git(["rev-parse", "HEAD"], cwd=work_dir).strip()
-    _run_git(["checkout", branch_a], cwd=work_dir)
-    sha_a = _run_git(["rev-parse", "HEAD"], cwd=work_dir).strip()
-    _run_git(["checkout", branch_b], cwd=work_dir)
+    # Discover Vercel preview URL for variant B
     sha_b = _run_git(["rev-parse", "HEAD"], cwd=work_dir).strip()
-
-    # Discover real Vercel preview URLs from GitHub deployments API
-    variant_a_url = _discover_deployment_url(sha_a, branch_a)
     variant_b_url = _discover_deployment_url(sha_b, branch_b)
 
-    logger.info("Variant A URL: %s", variant_a_url)
+    logger.info("Variant A URL (main): %s", MAIN_PRODUCTION_URL)
     logger.info("Variant B URL: %s", variant_b_url)
 
     return {
-        "branch_a": branch_a,
         "branch_b": branch_b,
-        "variant_a_url": variant_a_url,
+        "variant_a_url": MAIN_PRODUCTION_URL,
         "variant_b_url": variant_b_url,
     }
+
+
+def _update_main_experiment_marker(work_dir: str, week: int):
+    """Write experiment.json on main identifying it as the control for a given week."""
+    marker_path = os.path.join(work_dir, "experiment.json")
+    with open(marker_path, "w") as f:
+        json.dump({
+            "week": week,
+            "variant": "a",
+            "hypothesis": "",
+            "description": "Control — current production game",
+            "implementation_notes": "",
+        }, f, indent=2)
+        f.write("\n")
 
 
 def _discover_deployment_url(

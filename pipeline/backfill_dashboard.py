@@ -108,18 +108,33 @@ def pull_all_sessions() -> list[dict]:
     ORDER BY ce.event_time
     """
 
-    # Variant assignment from page properties (if available)
-    variant_query = f"""
-    SELECT DISTINCT
-      pv.session_id,
-      pp.experiment_week,
-      pp.experiment_variant
-    FROM {_bq_table('page_views')} pv
-    INNER JOIN {_bq_table('page_properties')} pp
-      ON pv.event_id = pp.event_id
-    WHERE pv.event_time >= TIMESTAMP('2026-05-01')
-      AND pp.experiment_week IS NOT NULL
-    """
+    # Variant assignment from page properties (if available).
+    # FullStory exports page properties with type suffixes (_str, _int),
+    # so we try both naming conventions.
+    variant_queries = [
+        f"""
+        SELECT DISTINCT
+          pv.session_id,
+          pp.experiment_week_int AS experiment_week,
+          pp.experiment_variant_str AS experiment_variant
+        FROM {_bq_table('page_views')} pv
+        INNER JOIN {_bq_table('page_properties')} pp
+          ON pv.event_id = pp.event_id
+        WHERE pv.event_time >= TIMESTAMP('2026-05-01')
+          AND pp.experiment_week_int IS NOT NULL
+        """,
+        f"""
+        SELECT DISTINCT
+          pv.session_id,
+          pp.experiment_week AS experiment_week,
+          pp.experiment_variant AS experiment_variant
+        FROM {_bq_table('page_views')} pv
+        INNER JOIN {_bq_table('page_properties')} pp
+          ON pv.event_id = pp.event_id
+        WHERE pv.event_time >= TIMESTAMP('2026-05-01')
+          AND pp.experiment_week IS NOT NULL
+        """,
+    ]
 
     sessions_raw = [dict(row) for row in client.query(session_query)]
     logger.info("Found %d page view records", len(sessions_raw))
@@ -140,14 +155,36 @@ def pull_all_sessions() -> list[dict]:
             fingerprints_by_session.setdefault(sid, []).append(fp)
 
     variants_by_session: dict[str, dict] = {}
-    try:
-        for row in client.query(variant_query):
-            r = dict(row)
-            sid = r.get("session_id")
-            if sid:
-                variants_by_session[sid] = r
-    except Exception as e:
-        logger.warning("Could not query page_properties (may not exist yet): %s", e)
+    for vq in variant_queries:
+        try:
+            for row in client.query(vq):
+                r = dict(row)
+                sid = r.get("session_id")
+                if sid and sid not in variants_by_session:
+                    variants_by_session[sid] = r
+            if variants_by_session:
+                logger.info("Found variant data for %d sessions via page_properties", len(variants_by_session))
+                break
+        except Exception as e:
+            logger.debug("Variant query attempt failed (trying next): %s", e)
+
+    if not variants_by_session:
+        logger.warning("No variant data from page_properties — will fall back to URL-based assignment")
+
+    # Build URL-to-variant mapping from experiments.json for fallback
+    url_variant_map: dict[str, tuple[str, int]] = {}
+    if EXPERIMENTS_JSON.exists():
+        with open(EXPERIMENTS_JSON) as f:
+            exp_data = json.load(f)
+        for exp in exp_data.get("experiments", []):
+            week = exp.get("week", 0)
+            for url_key, variant in [("variantAUrl", "a"), ("variantBUrl", "b")]:
+                url = exp.get(url_key, "")
+                if url:
+                    from urllib.parse import urlparse
+                    host = urlparse(url).netloc
+                    if host:
+                        url_variant_map[host] = (variant, week)
 
     enriched = []
     seen_sessions: set[str] = set()
@@ -166,6 +203,13 @@ def pull_all_sessions() -> list[dict]:
         variant_data = variants_by_session.get(sid, {})
         session["experiment_week"] = variant_data.get("experiment_week")
         session["experiment_variant"] = variant_data.get("experiment_variant")
+
+        # URL-based fallback: if no page property data, derive from url_host
+        if not session["experiment_variant"] and session.get("url_host"):
+            url_match = url_variant_map.get(session["url_host"])
+            if url_match:
+                session["experiment_variant"] = url_match[0]
+                session["experiment_week"] = session["experiment_week"] or url_match[1]
 
         enriched.append(session)
 
