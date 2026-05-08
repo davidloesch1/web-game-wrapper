@@ -131,7 +131,7 @@ export default function ConstellationScatter({ sessions, projections, onSelectSe
           <Tooltip content={<CustomTooltip />} />
           <Scatter
             data={scatterData}
-            onClick={(_data, _index, e) => {
+            onClick={(_data, _index) => {
               const point = scatterData[_index as number]
               if (point?.sessionId) onSelectSession(point.sessionId)
             }}
