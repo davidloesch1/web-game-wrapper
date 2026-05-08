@@ -89,24 +89,34 @@ def generate_summary(session_id: str, api_key: str) -> dict | None:
 
 
 def select_sessions_to_summarize(session_data: list[dict]) -> list[dict]:
-    """Select a diverse sample of sessions for AI summarization.
+    """Select a stratified sample of sessions for AI summarization.
 
-    Prioritizes interesting sessions: very short (bounces), very long
-    (power users), high frustration, and a random sample from the middle.
+    Allocates the budget across three tiers to avoid over-representing
+    outliers while still capturing the most informative sessions:
+      - 30% extreme/interesting (short bounces, power users, high frustration)
+      - 50% random from the middle tier
+      - 20% variant-balanced (equal A/B representation)
+
+    Within each tier, sessions with fingerprint data are preferred.
     """
+    import random
+
     if not session_data:
         return []
 
     if len(session_data) <= MAX_SESSIONS_TO_SUMMARIZE:
         return session_data
 
-    scored = []
-    for s in session_data:
+    budget = MAX_SESSIONS_TO_SUMMARIZE
+    extreme_budget = max(1, int(budget * 0.30))
+    variant_budget = max(1, int(budget * 0.20))
+    middle_budget = budget - extreme_budget - variant_budget
+
+    def _interest_score(s: dict) -> int:
         score = 0
         duration = s.get("duration_millis") or s.get("active_duration_millis") or 0
         rage = s.get("total_rage_clicks", 0) or 0
         dead = s.get("total_dead_clicks", 0) or 0
-        has_fingerprint = bool(s.get("fingerprint_events"))
 
         if duration < 10_000:
             score += 3
@@ -114,14 +124,39 @@ def select_sessions_to_summarize(session_data: list[dict]) -> list[dict]:
             score += 3
         if rage + dead > 3:
             score += 2
-        if has_fingerprint:
+        if bool(s.get("fingerprint_events")):
             score += 1
+        return score
 
-        scored.append((score, s))
+    scored = [(s, _interest_score(s)) for s in session_data]
+    scored.sort(key=lambda x: x[1], reverse=True)
 
-    scored.sort(key=lambda x: x[0], reverse=True)
+    # Tier 1: extreme/interesting sessions (top scores)
+    extreme = [s for s, _ in scored[:extreme_budget]]
+    used_ids = {id(s) for s in extreme}
 
-    selected = [s for _, s in scored[:MAX_SESSIONS_TO_SUMMARIZE]]
+    # Tier 3: variant-balanced sample (pull equally from A and B)
+    remaining = [(s, sc) for s, sc in scored if id(s) not in used_ids]
+    variant_a = [s for s, _ in remaining if (s.get("experiment_variant") or "").lower() == "a"]
+    variant_b = [s for s, _ in remaining if (s.get("experiment_variant") or "").lower() == "b"]
+
+    half_variant = max(1, variant_budget // 2)
+    random.shuffle(variant_a)
+    random.shuffle(variant_b)
+    variant_sample = variant_a[:half_variant] + variant_b[:half_variant]
+    used_ids.update(id(s) for s in variant_sample)
+
+    # Tier 2: random middle sample from everything remaining
+    middle_pool = [s for s, _ in remaining if id(s) not in used_ids]
+    random.shuffle(middle_pool)
+    middle = middle_pool[:middle_budget]
+
+    selected = extreme + middle + variant_sample
+
+    logger.info(
+        "Stratified sample: %d extreme, %d middle, %d variant-balanced (from %d total)",
+        len(extreme), len(middle), len(variant_sample), len(session_data),
+    )
     return selected
 
 
