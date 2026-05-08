@@ -1,0 +1,79 @@
+name: Self-Healing Pipeline
+
+on:
+  repository_dispatch:
+    types: [fullstory-error]
+  workflow_dispatch:
+    inputs:
+      error_payload:
+        description: 'JSON error payload (for manual testing)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  heal:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pipeline
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: pipeline/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name "SRE Agent"
+          git config --global user.email "sre@self-evolving-game.dev"
+
+      - name: Run self-healing pipeline
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GAME_REPO_URL: https://x-access-token:${{ secrets.GAME_REPO_PAT }}@github.com/davidloesch1/web-game.git
+          GAME_REPO_PAT: ${{ secrets.GAME_REPO_PAT }}
+          ERROR_PAYLOAD: ${{ github.event_name == 'repository_dispatch' && toJson(github.event.client_payload) || inputs.error_payload }}
+        run: python -c "
+import json, os, sys
+sys.path.insert(0, '.')
+from agents.site_reliability import run
+payload = json.loads(os.environ['ERROR_PAYLOAD'])
+result = run(payload)
+print(json.dumps(result, indent=2))
+if result.get('pr_url'):
+    print(f\"::notice::PR created: {result['pr_url']}\")
+elif result.get('action_taken') == 'skipped':
+    print(f\"::notice::Skipped: {result.get('reason', 'N/A')}\")
+"
+
+      - name: Commit healing log
+        if: always()
+        run: |
+          cd ..
+          if git diff --quiet pipeline/healing_log.json 2>/dev/null; then
+            echo "No healing log changes"
+          else
+            git add pipeline/healing_log.json
+            git commit -m "[self-heal] update healing log" || true
+            git push || true
+          fi
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sre-logs-${{ github.run_number }}
+          path: pipeline/healing_log.json
+          retention-days: 30
