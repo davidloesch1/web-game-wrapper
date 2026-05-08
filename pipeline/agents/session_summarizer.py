@@ -215,23 +215,88 @@ def run(session_data: list[dict]) -> list[dict]:
     return summaries
 
 
+UNDERSTANDING_LEVELS = ["none", "partial", "solid", "advanced"]
+
+
+def _understanding_index(level: str) -> int:
+    """Map an understanding level to an ordinal for computing shifts."""
+    try:
+        return UNDERSTANDING_LEVELS.index(level.lower())
+    except (ValueError, AttributeError):
+        return -1
+
+
+def _learning_velocity_stats(summaries: list[dict]) -> dict:
+    """Compute learning velocity metrics from onset times and progressions."""
+    onset_times = []
+    progression_counts: dict[str, int] = {}
+    understanding_shifts: list[int] = []
+
+    for s in summaries:
+        onset = s.get("learning_onset_seconds")
+        if isinstance(onset, (int, float)) and onset >= 0:
+            onset_times.append(onset)
+
+        prog = s.get("learning_progression", "unknown")
+        progression_counts[prog] = progression_counts.get(prog, 0) + 1
+
+        initial = _understanding_index(s.get("initial_understanding", ""))
+        final = _understanding_index(s.get("final_understanding", ""))
+        if initial >= 0 and final >= 0:
+            understanding_shifts.append(final - initial)
+
+    total = len(summaries)
+    sorted_onsets = sorted(onset_times)
+
+    improved = sum(1 for shift in understanding_shifts if shift > 0)
+    flat = sum(1 for shift in understanding_shifts if shift == 0)
+    regressed = sum(1 for shift in understanding_shifts if shift < 0)
+    shift_total = len(understanding_shifts)
+
+    return {
+        "learning_onset_seconds": {
+            "count": len(onset_times),
+            "mean": round(sum(onset_times) / len(onset_times), 1) if onset_times else None,
+            "median": sorted_onsets[len(sorted_onsets) // 2] if sorted_onsets else None,
+            "p25": sorted_onsets[len(sorted_onsets) // 4] if len(sorted_onsets) >= 4 else None,
+            "p75": sorted_onsets[3 * len(sorted_onsets) // 4] if len(sorted_onsets) >= 4 else None,
+        },
+        "learning_progression_distribution": progression_counts,
+        "mastered_quickly_pct": round(
+            progression_counts.get("mastered_quickly", 0) / total * 100, 1
+        ) if total else 0,
+        "understanding_shift": {
+            "improved_pct": round(improved / shift_total * 100, 1) if shift_total else 0,
+            "flat_pct": round(flat / shift_total * 100, 1) if shift_total else 0,
+            "regressed_pct": round(regressed / shift_total * 100, 1) if shift_total else 0,
+            "avg_shift": round(sum(understanding_shifts) / shift_total, 2) if shift_total else 0,
+        },
+    }
+
+
 def aggregate_summaries(summaries: list[dict]) -> dict:
     """Aggregate individual session summaries into a weekly qualitative report.
+
+    Includes learning velocity metrics: how quickly players learn, what
+    percentage progress within a session, and understanding shift distributions.
 
     Args:
         summaries: List of individual session summary dicts.
 
     Returns:
-        Aggregated report with counts, distributions, and top issues.
+        Aggregated report with counts, distributions, learning velocity,
+        and top issues.
     """
     if not summaries:
         return {"total_summarized": 0}
 
-    learning_stages = {}
-    engagement_levels = {}
-    all_functional_issues = []
-    all_design_gaps = []
-    all_frustration_signals = []
+    learning_stages: dict[str, int] = {}
+    engagement_levels: dict[str, int] = {}
+    initial_understanding_dist: dict[str, int] = {}
+    final_understanding_dist: dict[str, int] = {}
+    all_functional_issues: list[str] = []
+    all_design_gaps: list[str] = []
+    all_frustration_signals: list[str] = []
     understood_count = 0
 
     for s in summaries:
@@ -240,6 +305,12 @@ def aggregate_summaries(summaries: list[dict]) -> dict:
 
         engagement = s.get("engagement_quality", "unknown")
         engagement_levels[engagement] = engagement_levels.get(engagement, 0) + 1
+
+        initial = s.get("initial_understanding", "unknown")
+        initial_understanding_dist[initial] = initial_understanding_dist.get(initial, 0) + 1
+
+        final = s.get("final_understanding", "unknown")
+        final_understanding_dist[final] = final_understanding_dist.get(final, 0) + 1
 
         if s.get("understood_mechanics"):
             understood_count += 1
@@ -254,7 +325,6 @@ def aggregate_summaries(summaries: list[dict]) -> dict:
             if signal:
                 all_frustration_signals.append(signal)
 
-    # Count frequency of each issue/gap
     def top_items(items: list[str], limit: int = 5) -> list[dict]:
         counts: dict[str, int] = {}
         for item in items:
@@ -267,8 +337,11 @@ def aggregate_summaries(summaries: list[dict]) -> dict:
     return {
         "total_summarized": total,
         "understood_mechanics_pct": round(understood_count / total * 100, 1) if total else 0,
+        "initial_understanding_distribution": initial_understanding_dist,
+        "final_understanding_distribution": final_understanding_dist,
         "learning_curve_distribution": learning_stages,
         "engagement_distribution": engagement_levels,
+        "learning_velocity": _learning_velocity_stats(summaries),
         "top_functional_issues": top_items(all_functional_issues),
         "top_design_gaps": top_items(all_design_gaps),
         "top_frustration_signals": top_items(all_frustration_signals),
@@ -277,25 +350,37 @@ def aggregate_summaries(summaries: list[dict]) -> dict:
 
 
 def _variant_breakdown(summaries: list[dict]) -> dict:
-    """Break down summary metrics by experiment variant (A vs B)."""
+    """Break down all summary metrics by experiment variant (A vs B)."""
     variants: dict[str, list[dict]] = {}
     for s in summaries:
         v = s.get("experiment_variant", "unknown") or "unknown"
         variants.setdefault(v, []).append(s)
 
     breakdown = {}
-    for variant, variant_summaries in variants.items():
-        total = len(variant_summaries)
-        understood = sum(1 for s in variant_summaries if s.get("understood_mechanics"))
+    for variant, vsummaries in variants.items():
+        total = len(vsummaries)
+        understood = sum(1 for s in vsummaries if s.get("understood_mechanics"))
+
+        engagement_dist: dict[str, int] = {}
+        for s in vsummaries:
+            eng = s.get("engagement_quality", "unknown")
+            engagement_dist[eng] = engagement_dist.get(eng, 0) + 1
+
+        initial_dist: dict[str, int] = {}
+        final_dist: dict[str, int] = {}
+        for s in vsummaries:
+            ini = s.get("initial_understanding", "unknown")
+            initial_dist[ini] = initial_dist.get(ini, 0) + 1
+            fin = s.get("final_understanding", "unknown")
+            final_dist[fin] = final_dist.get(fin, 0) + 1
+
         breakdown[variant] = {
             "count": total,
             "understood_mechanics_pct": round(understood / total * 100, 1) if total else 0,
-            "engagement_distribution": {},
+            "engagement_distribution": engagement_dist,
+            "initial_understanding_distribution": initial_dist,
+            "final_understanding_distribution": final_dist,
+            "learning_velocity": _learning_velocity_stats(vsummaries),
         }
-        for s in variant_summaries:
-            eng = s.get("engagement_quality", "unknown")
-            breakdown[variant]["engagement_distribution"][eng] = (
-                breakdown[variant]["engagement_distribution"].get(eng, 0) + 1
-            )
 
     return breakdown

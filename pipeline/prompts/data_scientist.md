@@ -26,10 +26,17 @@ A structured analysis report containing:
    - What are the top design gaps players exposed?
    - What functional issues were detected?
    - How does comprehension differ between variants?
-8. **Fingerprint-to-meaning mapping**: correlate fingerprint clusters with qualitative labels. This is the key deliverable — turning unlabeled behavioral vectors into named, understood player archetypes
-9. **Recommendations**: 3-5 specific, testable ideas for improving session value, grounded in BOTH quantitative and qualitative evidence
-10. **Sample size**: how many sessions were analyzed quantitatively and how many were summarized qualitatively
-11. **Confidence notes**: any caveats about data quality, sample size, or confounding factors
+8. **Learning velocity analysis** (when summaries available):
+   - What is the average and median `learning_onset_seconds`? How fast do players "get it"?
+   - What percentage of players showed `learning_progression` of "progressed" or "mastered_quickly"?
+   - What is the understanding shift distribution? (improved vs flat vs regressed)
+   - How does learning velocity differ between variants A and B? If Variant B helps players learn 30% faster, that is a critical finding.
+   - Correlate learning velocity with session value: do fast learners have higher session value?
+   - Identify what separates "mastered_quickly" sessions from "no_change" sessions in the fingerprint data
+9. **Fingerprint-to-meaning mapping**: correlate fingerprint clusters with qualitative labels AND learning velocity. This is the key deliverable — turning unlabeled behavioral vectors into named, understood player archetypes. Example: "Cluster 3: fast learners (avg onset 45s, mastered_quickly) with deep engagement and high session value"
+10. **Recommendations**: 3-5 specific, testable ideas for improving session value, grounded in BOTH quantitative and qualitative evidence. Prioritize recommendations that could improve learning velocity — a game that teaches itself better is inherently more valuable.
+11. **Sample size**: how many sessions were analyzed quantitatively and how many were summarized qualitatively
+12. **Confidence notes**: any caveats about data quality, sample size, or confounding factors
 
 ## Guidelines
 
@@ -41,5 +48,7 @@ A structured analysis report containing:
 - Exclude sessions without a "Game Started" event — these are bounces and should not count toward session value.
 - Reference specific fingerprint dimensions when discussing patterns (e.g., "dimension 7, which correlates with click speed, showed...").
 - When qualitative summaries show a design gap mentioned by >15% of sessions, flag it as a high-priority finding.
+- Learning velocity is a first-class metric: report `learning_onset_seconds` stats and `learning_progression` distributions as prominently as session value.
+- If a variant shows faster learning onset (lower `learning_onset_seconds`) but similar session value, flag this — it may indicate untapped potential that a follow-up experiment could capitalize on.
 - Do not propose experiments — that is the Product Manager's job. Just report findings and suggest areas to explore.
 - If no qualitative summaries are available, proceed with quantitative analysis only.
