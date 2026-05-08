@@ -1,0 +1,47 @@
+name: Backfill Dashboard Data
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pipeline
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: pipeline/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run dashboard backfill
+        env:
+          BIGQUERY_CREDENTIALS: ${{ secrets.BIG_QUERY_CREDENTIALS }}
+          FULLSTORY_API_KEY: ${{ secrets.FULLSTORY_API_KEY }}
+        run: python backfill_dashboard.py
+
+      - name: Commit and push dashboard data
+        run: |
+          cd ..
+          git config --global user.name "Dashboard Backfill"
+          git config --global user.email "pipeline@self-evolving-game.dev"
+          git add public/data/dashboard.json
+          if git diff --cached --quiet; then
+            echo "No changes to dashboard data"
+          else
+            git commit -m "Update dashboard data (backfill)"
+            git push
+          fi

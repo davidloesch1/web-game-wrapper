@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
@@ -63,17 +64,49 @@ def _fs_request(path: str, api_key: str, method: str = "GET", body: dict | None 
         return None
 
 
-def generate_summary(session_id: str, api_key: str) -> dict | None:
+def _build_api_session_id(session: dict) -> str | None:
+    """Build a FullStory API session ID from BigQuery fields.
+
+    The Server API expects device_id:session_id (URL-encoded).
+    BigQuery stores these as separate fields or combined.
+    """
+    raw_id = session.get("session_id", "")
+    if not raw_id:
+        return None
+
+    if ":" in str(raw_id):
+        return urllib.parse.quote(str(raw_id), safe="")
+
+    device_id = session.get("device_id") or session.get("user_id")
+    if device_id:
+        combined = f"{device_id}:{raw_id}"
+        return urllib.parse.quote(combined, safe="")
+
+    return urllib.parse.quote(str(raw_id), safe="")
+
+
+def generate_summary(session_id: str, api_key: str, session: dict | None = None) -> dict | None:
     """Generate an AI summary for a single session using the prompt profile.
 
     Args:
-        session_id: FullStory session ID.
+        session_id: FullStory session ID (may need device_id prefix).
         api_key: FullStory API key.
+        session: Full session dict from BigQuery (used to build
+            the proper device_id:session_id if needed).
 
     Returns:
         Structured summary dict from FullStory's AI, or None on failure.
     """
-    path = f"/v2/sessions/{session_id}/summaries/{PROMPT_PROFILE_ID}"
+    if session:
+        encoded_id = _build_api_session_id(session)
+    else:
+        encoded_id = urllib.parse.quote(str(session_id), safe="")
+
+    if not encoded_id:
+        logger.warning("Could not build API session ID for %s", session_id)
+        return None
+
+    path = f"/v2/sessions/{encoded_id}/summaries/{PROMPT_PROFILE_ID}"
     result = _fs_request(path, api_key)
 
     if result is None:
@@ -192,7 +225,7 @@ def run(session_data: list[dict]) -> list[dict]:
         if not session_id:
             continue
 
-        summary = generate_summary(session_id, api_key)
+        summary = generate_summary(session_id, api_key, session=session)
         if summary:
             summary["session_id"] = session_id
             summary["experiment_variant"] = session.get("experiment_variant")
