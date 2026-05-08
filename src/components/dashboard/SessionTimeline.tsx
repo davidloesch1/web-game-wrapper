@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import type { DashboardSession, FingerprintEvent } from '../../types/dashboard'
 import FingerprintRadar from './FingerprintRadar'
 
@@ -44,8 +44,102 @@ const GAME_EVENT_STYLES: Record<string, { icon: string; color: string; label: st
   'Experiment Variant Selected': { icon: '🔬', color: 'text-purple-400', label: 'Variant Selected' },
 }
 
+interface FpCluster {
+  pct: number
+  indices: number[]
+  timeRange: [number, number]
+}
+
+const CLUSTER_THRESHOLD_PCT = 2.5
+
+function clusterFingerprints(
+  fps: FingerprintEvent[],
+  sessionStart: number,
+  durationMs: number,
+): FpCluster[] {
+  if (fps.length === 0) return []
+
+  const sorted = fps
+    .map((fp, i) => {
+      const t = new Date(fp.event_time).getTime()
+      const pct = Math.min(Math.max((t - sessionStart) / durationMs, 0), 1) * 100
+      return { pct, origIndex: i, timeS: Math.round((t - sessionStart) / 1000) }
+    })
+    .sort((a, b) => a.pct - b.pct)
+
+  const clusters: FpCluster[] = []
+  let current: typeof sorted = [sorted[0]]
+
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].pct - current[current.length - 1].pct <= CLUSTER_THRESHOLD_PCT) {
+      current.push(sorted[i])
+    } else {
+      const avgPct = current.reduce((s, c) => s + c.pct, 0) / current.length
+      clusters.push({
+        pct: avgPct,
+        indices: current.map((c) => c.origIndex),
+        timeRange: [current[0].timeS, current[current.length - 1].timeS],
+      })
+      current = [sorted[i]]
+    }
+  }
+  const avgPct = current.reduce((s, c) => s + c.pct, 0) / current.length
+  clusters.push({
+    pct: avgPct,
+    indices: current.map((c) => c.origIndex),
+    timeRange: [current[0].timeS, current[current.length - 1].timeS],
+  })
+
+  return clusters
+}
+
+interface GameEventPos {
+  event: FingerprintEvent
+  pct: number
+  tier: number
+  subtitle: string
+  style: { icon: string; color: string; label: string }
+  timeS: number
+}
+
+function staggerGameEvents(
+  gameEvents: FingerprintEvent[],
+  sessionStart: number,
+  durationMs: number,
+): GameEventPos[] {
+  const items = gameEvents.map((event) => {
+    const t = new Date(event.event_time).getTime()
+    const pct = Math.min(Math.max((t - sessionStart) / durationMs, 0), 1) * 100
+    const style = GAME_EVENT_STYLES[event.event_name] || {
+      icon: '📌', color: 'text-gray-400', label: event.event_name,
+    }
+
+    let subtitle = ''
+    const props = typeof event.event_properties === 'string'
+      ? (() => { try { return JSON.parse(event.event_properties) } catch { return {} } })()
+      : event.event_properties || {}
+    if (event.event_name === 'Game Completed') {
+      subtitle = props.outcome_str === 'win' ? ' (win)' : props.outcome_str === 'loss' ? ' (loss)' : ''
+    }
+
+    return { event, pct, tier: 0, subtitle, style, timeS: Math.round((t - sessionStart) / 1000) }
+  }).sort((a, b) => a.pct - b.pct)
+
+  for (let i = 1; i < items.length; i++) {
+    let maxTier = -1
+    for (let j = i - 1; j >= 0; j--) {
+      if (items[i].pct - items[j].pct > 8) break
+      if (items[j].tier > maxTier) maxTier = items[j].tier
+    }
+    if (maxTier >= 0) items[i].tier = maxTier + 1
+  }
+
+  return items
+}
+
 export default function SessionTimeline({ session, onBack }: Props) {
   const [selectedFpIndex, setSelectedFpIndex] = useState<number | null>(null)
+  const [expandedClusterIdx, setExpandedClusterIdx] = useState<number | null>(null)
   const summary = session.summary
   const allEvents = session.fingerprint_events || []
 
@@ -54,6 +148,20 @@ export default function SessionTimeline({ session, onBack }: Props) {
 
   const sessionStart = new Date(session.event_time).getTime()
   const durationMs = session.duration_millis || session.active_duration_millis || 60000
+
+  const clusters = useMemo(
+    () => clusterFingerprints(fps, sessionStart, durationMs),
+    [fps, sessionStart, durationMs],
+  )
+
+  const staggeredEvents = useMemo(
+    () => staggerGameEvents(gameEvents, sessionStart, durationMs),
+    [gameEvents, sessionStart, durationMs],
+  )
+
+  const maxTier = staggeredEvents.reduce((m, e) => Math.max(m, e.tier), 0)
+  const tierHeight = 28
+  const topPadding = (maxTier + 1) * tierHeight + 8
 
   const engagementStyle = summary
     ? ENGAGEMENT_BADGES[summary.engagement_quality] || { color: 'text-gray-400', bg: 'bg-gray-400/10' }
@@ -64,6 +172,18 @@ export default function SessionTimeline({ session, onBack }: Props) {
     learningOnset != null && learningOnset >= 0
       ? Math.min((learningOnset * 1000) / durationMs, 1) * 100
       : null
+
+  const handleClusterClick = (clusterIdx: number) => {
+    const cluster = clusters[clusterIdx]
+    if (cluster.indices.length === 1) {
+      setSelectedFpIndex(cluster.indices[0])
+      setExpandedClusterIdx(null)
+    } else {
+      setExpandedClusterIdx(expandedClusterIdx === clusterIdx ? null : clusterIdx)
+    }
+  }
+
+  const selectedCluster = expandedClusterIdx != null ? clusters[expandedClusterIdx] : null
 
   return (
     <div className="space-y-6">
@@ -137,6 +257,9 @@ export default function SessionTimeline({ session, onBack }: Props) {
         </h3>
         <p className="text-[10px] text-gray-600 mb-4">
           Fingerprint captures and game events over time
+          {fps.length > 0 && (
+            <span className="text-gray-500"> &middot; {fps.length} fingerprints in {clusters.length} groups</span>
+          )}
         </p>
 
         {fps.length === 0 && gameEvents.length === 0 ? (
@@ -144,76 +267,94 @@ export default function SessionTimeline({ session, onBack }: Props) {
         ) : (
           <div className="relative">
             {/* Timeline bar */}
-            <div className="relative h-20 mx-4">
+            <div className="relative mx-4" style={{ height: `${topPadding + 40}px` }}>
               {/* Base line */}
-              <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-gray-700 -translate-y-1/2" />
+              <div
+                className="absolute left-0 right-0 h-0.5 bg-gray-700"
+                style={{ top: `${topPadding}px` }}
+              />
 
               {/* Learning onset marker */}
               {learningOnsetPct != null && (
                 <div
-                  className="absolute top-0 bottom-0 w-0.5 bg-green-500/50"
-                  style={{ left: `${learningOnsetPct}%` }}
+                  className="absolute w-0.5 bg-green-500/50"
+                  style={{
+                    left: `${learningOnsetPct}%`,
+                    top: '0px',
+                    bottom: '0px',
+                  }}
                 >
-                  <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[9px] text-green-400 whitespace-nowrap">
+                  <div className="absolute -top-5 left-1/2 -translate-x-1/2 text-[9px] text-green-400 whitespace-nowrap font-medium">
                     learned ({learningOnset}s)
                   </div>
                 </div>
               )}
 
-              {/* Game event markers (above the line) */}
-              {gameEvents.map((event, i) => {
-                const eventTime = new Date(event.event_time).getTime()
-                const pct = Math.min(Math.max((eventTime - sessionStart) / durationMs, 0), 1) * 100
-                const style = GAME_EVENT_STYLES[event.event_name] || { icon: '📌', color: 'text-gray-400', label: event.event_name }
-
-                let subtitle = ''
-                const props = typeof event.event_properties === 'string'
-                  ? (() => { try { return JSON.parse(event.event_properties) } catch { return {} } })()
-                  : event.event_properties || {}
-                if (event.event_name === 'Game Completed') {
-                  subtitle = props.outcome_str === 'win' ? ' (win)' : props.outcome_str === 'loss' ? ' (loss)' : ''
-                }
-
+              {/* Staggered game event markers (above the line) */}
+              {staggeredEvents.map((item, i) => {
+                const topOffset = topPadding - (item.tier + 1) * tierHeight
                 return (
                   <div
                     key={`game-${i}`}
                     className="absolute -translate-x-1/2 flex flex-col items-center"
-                    style={{ left: `${pct}%`, top: '0px' }}
-                    title={`${style.label}${subtitle} at ${Math.round((eventTime - sessionStart) / 1000)}s`}
+                    style={{ left: `${item.pct}%`, top: `${topOffset}px` }}
+                    title={`${item.style.label}${item.subtitle} at ${item.timeS}s`}
                   >
-                    <span className="text-sm">{style.icon}</span>
-                    <span className={`text-[8px] ${style.color} whitespace-nowrap`}>
-                      {style.label}{subtitle}
+                    <span className="text-sm">{item.style.icon}</span>
+                    <span className={`text-[8px] ${item.style.color} whitespace-nowrap`}>
+                      {item.style.label}{item.subtitle}
                     </span>
-                    <div className={`h-3 w-0.5 ${style.color.replace('text-', 'bg-')} opacity-30`} />
+                    <div
+                      className={`w-0.5 ${item.style.color.replace('text-', 'bg-')} opacity-30`}
+                      style={{ height: `${item.tier * tierHeight + 6}px` }}
+                    />
                   </div>
                 )
               })}
 
-              {/* Fingerprint dots (on the line) */}
-              {fps.map((fp, i) => {
-                const fpTime = new Date(fp.event_time).getTime()
-                const pct = Math.min(Math.max((fpTime - sessionStart) / durationMs, 0), 1) * 100
-                const isSelected = selectedFpIndex === i
+              {/* Clustered fingerprint dots (on the line) */}
+              {clusters.map((cluster, ci) => {
+                const isExpanded = expandedClusterIdx === ci
+                const containsSelected = selectedFpIndex != null && cluster.indices.includes(selectedFpIndex)
+                const isSingle = cluster.indices.length === 1
 
                 return (
                   <button
-                    key={`fp-${i}`}
-                    onClick={() => setSelectedFpIndex(isSelected ? null : i)}
-                    className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full transition-all cursor-pointer
-                      ${isSelected
-                        ? 'h-5 w-5 bg-cyan-400 ring-2 ring-cyan-400/30 z-10'
-                        : 'h-3 w-3 bg-cyan-600 hover:bg-cyan-500 hover:scale-125'
+                    key={`cluster-${ci}`}
+                    onClick={() => handleClusterClick(ci)}
+                    className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full transition-all cursor-pointer flex items-center justify-center
+                      ${isExpanded
+                        ? 'ring-2 ring-cyan-400/40 bg-cyan-500 z-10'
+                        : containsSelected
+                          ? 'ring-2 ring-cyan-400/30 bg-cyan-400 z-10'
+                          : isSingle
+                            ? 'bg-cyan-600 hover:bg-cyan-500 hover:scale-125'
+                            : 'bg-cyan-600 hover:bg-cyan-500'
                       }`}
-                    style={{ left: `${pct}%` }}
-                    title={`Fingerprint ${i + 1} at ${Math.round((fpTime - sessionStart) / 1000)}s`}
-                  />
+                    style={{
+                      left: `${cluster.pct}%`,
+                      top: `${topPadding}px`,
+                      width: isSingle ? '12px' : `${Math.min(14 + cluster.indices.length * 1.5, 28)}px`,
+                      height: isSingle ? '12px' : `${Math.min(14 + cluster.indices.length * 1.5, 28)}px`,
+                    }}
+                    title={
+                      isSingle
+                        ? `Fingerprint #${cluster.indices[0] + 1} at ${cluster.timeRange[0]}s`
+                        : `${cluster.indices.length} fingerprints (${cluster.timeRange[0]}s – ${cluster.timeRange[1]}s) — click to expand`
+                    }
+                  >
+                    {!isSingle && (
+                      <span className="text-[9px] font-bold text-white leading-none">
+                        {cluster.indices.length}
+                      </span>
+                    )}
+                  </button>
                 )
               })}
             </div>
 
             {/* Time labels */}
-            <div className="flex justify-between mx-4 text-[10px] text-gray-600">
+            <div className="flex justify-between mx-4 mt-1 text-[10px] text-gray-600">
               <span>0s</span>
               <span>{Math.round(durationMs / 2000)}s</span>
               <span>{Math.round(durationMs / 1000)}s</span>
@@ -225,6 +366,12 @@ export default function SessionTimeline({ session, onBack }: Props) {
                 <span className="inline-block h-2 w-2 rounded-full bg-cyan-600" />
                 Fingerprint
               </div>
+              <div className="flex items-center gap-1">
+                <span className="inline-block h-4 w-4 rounded-full bg-cyan-600 text-[8px] text-white flex items-center justify-center font-bold">
+                  3
+                </span>
+                Cluster
+              </div>
               {Object.entries(GAME_EVENT_STYLES).map(([name, style]) => (
                 <div key={name} className="flex items-center gap-1">
                   <span>{style.icon}</span>
@@ -232,6 +379,46 @@ export default function SessionTimeline({ session, onBack }: Props) {
                 </div>
               ))}
             </div>
+
+            {/* Expanded cluster panel */}
+            {selectedCluster && (
+              <div className="mx-4 mt-3 rounded-lg border border-cyan-800/50 bg-cyan-950/30 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] text-cyan-400 font-semibold">
+                    {selectedCluster.indices.length} fingerprints
+                    ({selectedCluster.timeRange[0]}s – {selectedCluster.timeRange[1]}s)
+                  </span>
+                  <button
+                    onClick={() => setExpandedClusterIdx(null)}
+                    className="text-[10px] text-gray-500 hover:text-gray-300"
+                  >
+                    collapse
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedCluster.indices.map((fpIdx) => {
+                    const fp = fps[fpIdx]
+                    const fpTimeS = Math.round(
+                      (new Date(fp.event_time).getTime() - sessionStart) / 1000,
+                    )
+                    const isActive = selectedFpIndex === fpIdx
+                    return (
+                      <button
+                        key={fpIdx}
+                        onClick={() => setSelectedFpIndex(isActive ? null : fpIdx)}
+                        className={`rounded px-2 py-1 text-[10px] transition-colors
+                          ${isActive
+                            ? 'bg-cyan-500 text-white font-semibold'
+                            : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                          }`}
+                      >
+                        #{fpIdx + 1} <span className="text-gray-500">{fpTimeS}s</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
