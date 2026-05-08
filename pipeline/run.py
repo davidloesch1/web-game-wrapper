@@ -4,13 +4,14 @@ Pulls data, runs the AI agent team, and publishes the next experiment.
 Designed to run as a GitHub Action on a weekly cron schedule.
 
 Lifecycle per week:
-  1. Pull session data from BigQuery
-  2. Data Scientist analyzes the data
-  3. Close previous experiment (determine winner from analysis)
-  4. Merge winning variant into main (game production site updates)
-  5. PM proposes next experiment, Ethics + Judge approve
-  6. Engineering agent creates two new variant branches
-  7. Update experiments.json and push (wrapper site updates)
+  1.  Pull session data from BigQuery (quantitative)
+  1b. Generate AI session summaries via FullStory (qualitative)
+  2.  Data Scientist analyzes both quantitative + qualitative data
+  3.  Close previous experiment (determine winner from analysis)
+  4.  Merge winning variant into main (game production site updates)
+  5.  PM proposes next experiment, Ethics + Judge approve
+  6.  Engineering agent creates two new variant branches
+  7.  Update experiments.json and push (wrapper site updates)
 
 All experiment branches are kept permanently as playable archives.
 """
@@ -37,6 +38,10 @@ from agents import (
     judge_experiment,
     implement_experiment,
     merge_winner,
+)
+from agents.session_summarizer import (
+    run as summarize_sessions,
+    aggregate_summaries,
 )
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -437,9 +442,27 @@ def run_pipeline():
         session_data = []
         logger.info("No previous experiment — using empty dataset for baseline")
 
+    # --- Stage 1b: Generate AI session summaries via FullStory ---
+    logger.info("--- Stage 1b: FullStory AI session summaries ---")
+    session_summaries = []
+    qualitative_report = {"total_summarized": 0}
+    if session_data:
+        try:
+            session_summaries = summarize_sessions(session_data)
+            qualitative_report = aggregate_summaries(session_summaries)
+            logger.info(
+                "Qualitative report: %d sessions summarized, %s%% understood mechanics",
+                qualitative_report.get("total_summarized", 0),
+                qualitative_report.get("understood_mechanics_pct", "N/A"),
+            )
+        except Exception as e:
+            logger.warning("Session summary generation failed (non-fatal): %s", e)
+    else:
+        logger.info("No sessions to summarize")
+
     # --- Stage 2: Data Scientist analysis ---
     logger.info("--- Stage 2: Data Scientist analysis ---")
-    analysis = analyze_data(session_data, experiment_history)
+    analysis = analyze_data(session_data, experiment_history, qualitative_report)
     logger.info("Analysis summary: %s", analysis.get("summary", "N/A"))
 
     # --- Stage 3: Close previous experiment and merge winner ---
