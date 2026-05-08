@@ -38,7 +38,6 @@ export default function UnderstandingSankey({ sessions }: Props) {
     flows[key] = (flows[key] || 0) + 1
   }
 
-  const maxFlow = Math.max(...Object.values(flows), 1)
   const leftCounts: Record<string, number> = {}
   const rightCounts: Record<string, number> = {}
   for (const s of summarized) {
@@ -48,7 +47,6 @@ export default function UnderstandingSankey({ sessions }: Props) {
     rightCounts[to] = (rightCounts[to] || 0) + 1
   }
 
-  const total = summarized.length
   const svgHeight = 200
   const nodeWidth = 24
   const padding = 8

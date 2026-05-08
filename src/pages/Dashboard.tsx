@@ -15,7 +15,7 @@ import MetricChart from '../components/MetricChart'
 import type { DashboardSession } from '../types/dashboard'
 
 export default function Dashboard() {
-  const { data: dashData, loading: dashLoading, error: dashError } = useDashboardData()
+  const { data: dashData, loading: dashLoading } = useDashboardData()
   const { data: expData, loading: expLoading } = useExperimentData()
 
   const [selectedWeek, setSelectedWeek] = useState<number | null>(null)

@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   ScatterChart,
   Scatter,
@@ -34,7 +33,6 @@ const PROGRESSION_LABELS: Record<string, string> = {
 }
 
 export default function ConstellationScatter({ sessions, projections, onSelectSession }: Props) {
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
 
   const summaryMap = new Map(
     sessions
@@ -133,20 +131,16 @@ export default function ConstellationScatter({ sessions, projections, onSelectSe
           <Tooltip content={<CustomTooltip />} />
           <Scatter
             data={scatterData}
-            onClick={(entry) => {
-              if (entry?.sessionId) onSelectSession(entry.sessionId)
+            onClick={(_data, _index, e) => {
+              const point = scatterData[_index as number]
+              if (point?.sessionId) onSelectSession(point.sessionId)
             }}
-            onMouseEnter={(entry) => setHoveredId(entry?.sessionId)}
-            onMouseLeave={() => setHoveredId(null)}
           >
             {scatterData.map((entry, i) => (
               <Cell
                 key={i}
                 fill={PROGRESSION_COLORS[entry.progression]}
-                fillOpacity={hoveredId === entry.sessionId ? 1 : 0.7}
-                r={hoveredId === entry.sessionId ? 7 : 5}
-                stroke={hoveredId === entry.sessionId ? '#fff' : 'none'}
-                strokeWidth={1.5}
+                fillOpacity={0.7}
                 cursor="pointer"
               />
             ))}
