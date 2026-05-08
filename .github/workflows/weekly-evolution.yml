@@ -38,6 +38,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           BIGQUERY_CREDENTIALS: ${{ secrets.BIG_QUERY_CREDENTIALS }}
+          FULLSTORY_API_KEY: ${{ secrets.FULLSTORY_API_KEY }}
           GAME_REPO_URL: https://x-access-token:${{ secrets.GAME_REPO_PAT }}@github.com/davidloesch1/web-game.git
         run: python run.py
 
