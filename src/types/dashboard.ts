@@ -26,7 +26,9 @@ export interface Projection {
   session_id: string
   x: number
   y: number
-  event_time: string
+  event_time?: string
+  fingerprint_index?: number
+  fingerprint_count?: number
   experiment_variant?: string
   experiment_week?: number
 }
@@ -115,4 +117,5 @@ export interface DashboardData {
   current_week: number
   sessions: DashboardSession[]
   projections: Projection[]
+  session_projections: Projection[]
 }

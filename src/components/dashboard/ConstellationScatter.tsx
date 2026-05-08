@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   ScatterChart,
   Scatter,
@@ -10,9 +11,12 @@ import {
 } from 'recharts'
 import type { DashboardSession, Projection } from '../../types/dashboard'
 
+type ViewMode = 'fingerprints' | 'sessions'
+
 interface Props {
   sessions: DashboardSession[]
   projections: Projection[]
+  sessionProjections: Projection[]
   onSelectSession: (sessionId: string) => void
 }
 
@@ -32,15 +36,21 @@ const PROGRESSION_LABELS: Record<string, string> = {
   unknown: 'No Summary',
 }
 
-export default function ConstellationScatter({ sessions, projections, onSelectSession }: Props) {
+export default function ConstellationScatter({
+  sessions,
+  projections,
+  sessionProjections,
+  onSelectSession,
+}: Props) {
+  const [viewMode, setViewMode] = useState<ViewMode>('sessions')
 
   const summaryMap = new Map(
-    sessions
-      .filter((s) => s.summary)
-      .map((s) => [s.session_id, s.summary!]),
+    sessions.filter((s) => s.summary).map((s) => [s.session_id, s.summary!]),
   )
 
-  const scatterData = projections.map((p) => {
+  const activeProjections = viewMode === 'sessions' ? sessionProjections : projections
+
+  const scatterData = activeProjections.map((p) => {
     const summary = summaryMap.get(p.session_id)
     const session = sessions.find((s) => s.session_id === p.session_id)
     return {
@@ -54,10 +64,19 @@ export default function ConstellationScatter({ sessions, projections, onSelectSe
         ? Math.round(session.active_duration_millis / 1000)
         : null,
       narrative: summary?.session_narrative || null,
+      fingerprintIndex: p.fingerprint_index,
+      fingerprintCount: p.fingerprint_count,
+      eventTime: p.event_time || null,
     }
   })
 
-  const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ payload: typeof scatterData[0] }> }) => {
+  const CustomTooltip = ({
+    active,
+    payload,
+  }: {
+    active?: boolean
+    payload?: Array<{ payload: (typeof scatterData)[0] }>
+  }) => {
     if (!active || !payload?.length) return null
     const d = payload[0].payload
     return (
@@ -71,9 +90,26 @@ export default function ConstellationScatter({ sessions, projections, onSelectSe
             {PROGRESSION_LABELS[d.progression]}
           </span>
           {d.variant !== 'unknown' && (
-            <span className="ml-auto text-gray-500">Variant {d.variant.toUpperCase()}</span>
+            <span className="ml-auto text-gray-500">
+              Variant {d.variant.toUpperCase()}
+            </span>
           )}
         </div>
+        {viewMode === 'fingerprints' && d.fingerprintIndex != null && (
+          <p className="text-gray-400">
+            Fingerprint #{d.fingerprintIndex + 1}
+            {d.eventTime && (
+              <span className="text-gray-500 ml-1">
+                &middot; {new Date(d.eventTime).toLocaleTimeString()}
+              </span>
+            )}
+          </p>
+        )}
+        {viewMode === 'sessions' && d.fingerprintCount != null && (
+          <p className="text-gray-400">
+            {d.fingerprintCount} fingerprint{d.fingerprintCount !== 1 ? 's' : ''} in session
+          </p>
+        )}
         {d.duration !== null && (
           <p className="text-gray-400">Active time: {d.duration}s</p>
         )}
@@ -88,25 +124,48 @@ export default function ConstellationScatter({ sessions, projections, onSelectSe
     )
   }
 
+  const descriptions: Record<ViewMode, string> = {
+    sessions:
+      'Each dot is one session — position from average behavioral fingerprint, color from learning progression',
+    fingerprints:
+      'Each dot is one fingerprint snapshot — similar positions mean similar player behavior at that moment',
+  }
+
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-gray-400">Session Constellation</h3>
-          <p className="text-xs text-gray-600 mt-0.5">
-            Each dot is a session &mdash; position from behavioral fingerprint, color from learning progression
-          </p>
+          <h3 className="text-sm font-semibold text-gray-400">
+            Session Constellation
+          </h3>
+          <p className="text-xs text-gray-600 mt-0.5">{descriptions[viewMode]}</p>
         </div>
-        <div className="flex gap-3 text-[10px]">
-          {Object.entries(PROGRESSION_LABELS).filter(([k]) => k !== 'unknown').map(([key, label]) => (
-            <div key={key} className="flex items-center gap-1">
-              <span
-                className="inline-block h-2 w-2 rounded-full"
-                style={{ backgroundColor: PROGRESSION_COLORS[key] }}
-              />
-              <span className="text-gray-500">{label}</span>
-            </div>
-          ))}
+        <div className="flex items-center gap-3">
+          <select
+            value={viewMode}
+            onChange={(e) => setViewMode(e.target.value as ViewMode)}
+            className="rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1 text-xs text-gray-300 focus:border-cyan-500 focus:outline-none"
+          >
+            <option value="sessions">
+              By Session ({sessionProjections.length})
+            </option>
+            <option value="fingerprints">
+              By Fingerprint ({projections.length})
+            </option>
+          </select>
+          <div className="flex gap-3 text-[10px]">
+            {Object.entries(PROGRESSION_LABELS)
+              .filter(([k]) => k !== 'unknown')
+              .map(([key, label]) => (
+                <div key={key} className="flex items-center gap-1">
+                  <span
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{ backgroundColor: PROGRESSION_COLORS[key] }}
+                  />
+                  <span className="text-gray-500">{label}</span>
+                </div>
+              ))}
+          </div>
         </div>
       </div>
       <ResponsiveContainer width="100%" height={360}>
@@ -140,7 +199,8 @@ export default function ConstellationScatter({ sessions, projections, onSelectSe
               <Cell
                 key={i}
                 fill={PROGRESSION_COLORS[entry.progression]}
-                fillOpacity={0.7}
+                fillOpacity={viewMode === 'fingerprints' ? 0.5 : 0.7}
+                r={viewMode === 'fingerprints' ? 4 : 6}
                 cursor="pointer"
               />
             ))}

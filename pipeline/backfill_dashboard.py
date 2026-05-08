@@ -173,66 +173,75 @@ def pull_all_sessions() -> list[dict]:
     return enriched
 
 
-def project_fingerprints_2d(sessions: list[dict]) -> list[dict]:
-    """Project 32-D fingerprint vectors down to 2D for scatter visualization.
+def _parse_fingerprint_vec(props: dict | str) -> list[float] | None:
+    """Extract a 32-D vector from fingerprint event properties."""
+    if isinstance(props, str):
+        try:
+            props = json.loads(props)
+        except (json.JSONDecodeError, TypeError):
+            return None
 
-    Uses a simple PCA-like approach (first two principal components via
-    power iteration) to avoid requiring scikit-learn as a dependency.
-    Falls back to random jitter if fingerprints are unavailable.
+    vec: list[float] = []
+    for dim in range(32):
+        for key_pattern in [f"dim_{dim}", f"d{dim}", f"dimension_{dim}"]:
+            if key_pattern in props:
+                try:
+                    vec.append(float(props[key_pattern]))
+                except (ValueError, TypeError):
+                    vec.append(0.0)
+                break
+        else:
+            val = props.get(f"dim_{dim}_real", 0.0)
+            try:
+                vec.append(float(val))
+            except (ValueError, TypeError):
+                vec.append(0.0)
+
+    return vec if len(vec) == 32 else None
+
+
+def project_fingerprints_2d(sessions: list[dict]) -> dict:
+    """Project 32-D fingerprint vectors to 2D for scatter visualization.
+
+    Returns a dict with two keys:
+      - "fingerprint_projections": one dot per fingerprint snapshot across all
+        sessions (includes fingerprint_index and event_time for each).
+      - "session_projections": one dot per session, computed as the centroid
+        (mean) of all fingerprint vectors within that session, projected onto
+        the same PCA axes.
     """
-    vectors = []
-    session_indices = []
+    vectors: list[list[float]] = []
+    session_indices: list[int] = []
+    fp_indices: list[int] = []
+    fp_times: list[str] = []
 
     for i, session in enumerate(sessions):
         fps = session.get("fingerprint_events", [])
         if not fps:
             continue
-
-        for fp in fps:
-            props = fp.get("event_properties", {})
-            if isinstance(props, str):
-                try:
-                    props = json.loads(props)
-                except (json.JSONDecodeError, TypeError):
-                    continue
-
-            vec = []
-            for dim in range(32):
-                for key_pattern in [f"dim_{dim}", f"d{dim}", f"dimension_{dim}"]:
-                    if key_pattern in props:
-                        try:
-                            vec.append(float(props[key_pattern]))
-                        except (ValueError, TypeError):
-                            vec.append(0.0)
-                        break
-                else:
-                    val = props.get(f"dim_{dim}_real", 0.0)
-                    try:
-                        vec.append(float(val))
-                    except (ValueError, TypeError):
-                        vec.append(0.0)
-
-            if len(vec) == 32:
+        for fp_idx, fp in enumerate(fps):
+            vec = _parse_fingerprint_vec(fp.get("event_properties", {}))
+            if vec is not None:
                 vectors.append(vec)
                 session_indices.append(i)
+                fp_indices.append(fp_idx)
+                fp_times.append(str(fp.get("event_time", "")))
 
     if not vectors:
         logger.info("No fingerprint vectors found — skipping 2D projection")
-        return []
+        return {"fingerprint_projections": [], "session_projections": []}
 
     logger.info("Projecting %d fingerprint vectors to 2D", len(vectors))
 
     n = len(vectors)
     d = 32
 
-    # Compute mean
     mean = [0.0] * d
     for v in vectors:
         for j in range(d):
             mean[j] += v[j]
     mean = [m / n for m in mean]
 
-    # Center the data
     centered = [[v[j] - mean[j] for j in range(d)] for v in vectors]
 
     def _dot(a: list[float], b: list[float]) -> float:
@@ -241,21 +250,16 @@ def project_fingerprints_2d(sessions: list[dict]) -> list[dict]:
     def _norm(a: list[float]) -> float:
         return math.sqrt(sum(x * x for x in a))
 
-    def _scale(a: list[float], s: float) -> list[float]:
-        return [x * s for x in a]
-
     def _subtract_projection(a: list[float], b: list[float]) -> list[float]:
         proj = _dot(a, b) / max(_dot(b, b), 1e-10)
         return [a[j] - proj * b[j] for j in range(len(a))]
 
-    # Power iteration for first principal component
     def _power_iteration(data: list[list[float]], num_iters: int = 50) -> list[float]:
         import random
         random.seed(42)
         w = [random.gauss(0, 1) for _ in range(d)]
         norm_w = _norm(w)
         w = [x / max(norm_w, 1e-10) for x in w]
-
         for _ in range(num_iters):
             new_w = [0.0] * d
             for row in data:
@@ -270,24 +274,57 @@ def project_fingerprints_2d(sessions: list[dict]) -> list[dict]:
     deflected = [_subtract_projection(row, pc1) for row in centered]
     pc2 = _power_iteration(deflected)
 
-    projections = []
+    # --- Fingerprint-level projections (one dot per fingerprint snapshot) ---
+    fingerprint_projections = []
     for idx, vec in enumerate(centered):
         x = _dot(vec, pc1)
         y = _dot(vec, pc2)
         si = session_indices[idx]
         session = sessions[si]
-        fp_event = session.get("fingerprint_events", [])[0] if session.get("fingerprint_events") else {}
-
-        projections.append({
+        fingerprint_projections.append({
             "session_id": session.get("session_id"),
             "x": round(x, 4),
             "y": round(y, 4),
-            "event_time": str(fp_event.get("event_time", "")),
+            "event_time": fp_times[idx],
+            "fingerprint_index": fp_indices[idx],
             "experiment_variant": session.get("experiment_variant"),
             "experiment_week": session.get("experiment_week"),
         })
 
-    return projections
+    # --- Session-level projections (centroid of each session's fingerprints) ---
+    from collections import defaultdict
+    session_vecs: dict[int, list[list[float]]] = defaultdict(list)
+    for idx, vec in enumerate(vectors):
+        session_vecs[session_indices[idx]].append(vec)
+
+    session_projections = []
+    for si, vecs in session_vecs.items():
+        centroid = [0.0] * d
+        for v in vecs:
+            for j in range(d):
+                centroid[j] += v[j]
+        centroid = [c / len(vecs) for c in centroid]
+        centroid_centered = [centroid[j] - mean[j] for j in range(d)]
+        x = _dot(centroid_centered, pc1)
+        y = _dot(centroid_centered, pc2)
+        session = sessions[si]
+        session_projections.append({
+            "session_id": session.get("session_id"),
+            "x": round(x, 4),
+            "y": round(y, 4),
+            "fingerprint_count": len(vecs),
+            "experiment_variant": session.get("experiment_variant"),
+            "experiment_week": session.get("experiment_week"),
+        })
+
+    logger.info(
+        "  Fingerprint dots: %d | Session centroids: %d",
+        len(fingerprint_projections), len(session_projections),
+    )
+    return {
+        "fingerprint_projections": fingerprint_projections,
+        "session_projections": session_projections,
+    }
 
 
 def _serialize_session(session: dict) -> dict:
@@ -350,11 +387,13 @@ def main():
 
     # Compute 2D projections for fingerprint scatter
     logger.info("--- Computing 2D fingerprint projections ---")
-    projections = project_fingerprints_2d(sessions)
+    projection_result = project_fingerprints_2d(sessions)
+    fingerprint_projections = projection_result["fingerprint_projections"]
+    session_projections = projection_result["session_projections"]
 
     # Attach summaries and projections to session data
     projection_by_session: dict[str, dict] = {}
-    for p in projections:
+    for p in session_projections:
         sid = p.get("session_id")
         if sid and sid not in projection_by_session:
             projection_by_session[sid] = p
@@ -383,7 +422,8 @@ def main():
         "goal": experiments.get("goal", ""),
         "current_week": experiments.get("currentWeek", 1),
         "sessions": sessions_for_dashboard,
-        "projections": projections,
+        "projections": fingerprint_projections,
+        "session_projections": session_projections,
     }
 
     # Write to public/data/dashboard.json
@@ -397,8 +437,9 @@ def main():
         "  Sessions: %d | Summaries: %d | Projections: %d",
         len(sessions_for_dashboard),
         len(session_summaries),
-        len(projections),
+        len(fingerprint_projections),
     )
+    logger.info("  Session centroids: %d", len(session_projections))
     logger.info("=== Backfill complete ===")
 
 

@@ -56,6 +56,12 @@ export default function Dashboard() {
     return dashData.projections.filter((p) => sessionIds.has(p.session_id))
   }, [dashData, filteredSessions])
 
+  const filteredSessionProjections = useMemo(() => {
+    if (!dashData?.session_projections) return []
+    const sessionIds = new Set(filteredSessions.map((s) => s.session_id))
+    return dashData.session_projections.filter((p) => sessionIds.has(p.session_id))
+  }, [dashData, filteredSessions])
+
   const selectedSession = useMemo(() => {
     if (!selectedSessionId || !dashData) return null
     return dashData.sessions.find((s) => s.session_id === selectedSessionId) || null
@@ -151,6 +157,7 @@ export default function Dashboard() {
               <ConstellationScatter
                 sessions={filteredSessions}
                 projections={filteredProjections}
+                sessionProjections={filteredSessionProjections}
                 onSelectSession={setSelectedSessionId}
               />
             </div>
