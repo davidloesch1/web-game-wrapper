@@ -163,7 +163,7 @@ export default function SessionTimeline({ session, onBack }: Props) {
   const tierHeight = 28
   const topPadding = (maxTier + 1) * tierHeight + 8
 
-  const engagementStyle = summary
+  const engagementStyle = summary?.engagement_quality
     ? ENGAGEMENT_BADGES[summary.engagement_quality] || { color: 'text-gray-400', bg: 'bg-gray-400/10' }
     : { color: 'text-gray-400', bg: 'bg-gray-400/10' }
 
@@ -202,9 +202,14 @@ export default function SessionTimeline({ session, onBack }: Props) {
           </p>
         </div>
         <div className="text-right">
-          {summary && (
+          {summary?.engagement_quality && (
             <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${engagementStyle.color} ${engagementStyle.bg}`}>
               {summary.engagement_quality.replace('_', ' ')}
+            </span>
+          )}
+          {summary?.archetype && (
+            <span className="inline-block px-2 py-0.5 rounded text-xs font-medium text-cyan-400 bg-cyan-400/10 ml-1 capitalize">
+              {summary.archetype.primary.replace('_', ' ')}
             </span>
           )}
           <div className="text-xs text-gray-500 mt-1">
@@ -226,8 +231,46 @@ export default function SessionTimeline({ session, onBack }: Props) {
         </div>
       )}
 
-      {/* Summary badges */}
-      {summary && (
+      {/* Behavioral profile badges (new format) */}
+      {summary?.archetype && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-3 text-center">
+            <div className="text-[10px] text-gray-500 mb-1">Archetype</div>
+            <div className="text-sm font-bold text-white capitalize">{summary.archetype.primary.replace('_', ' ')}</div>
+            <div className="text-[10px] text-gray-600">{Math.round(summary.archetype.confidence * 100)}% confidence</div>
+          </div>
+          <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-3 text-center">
+            <div className="text-[10px] text-gray-500 mb-1">Intent</div>
+            <div className="text-sm font-bold text-white capitalize">{summary.intent?.primary?.replace('_', ' ') || '—'}</div>
+            {summary.intent?.fulfilled != null && (
+              <div className={`text-[10px] ${summary.intent.fulfilled ? 'text-green-400' : 'text-red-400'}`}>
+                {summary.intent.fulfilled ? 'Fulfilled' : 'Unfulfilled'}
+              </div>
+            )}
+          </div>
+          <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-3 text-center">
+            <div className="text-[10px] text-gray-500 mb-1">Dominant State</div>
+            <div className="text-sm font-bold text-white capitalize">{summary.dominant_state || '—'}</div>
+          </div>
+          <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-3 text-center">
+            <div className="text-[10px] text-gray-500 mb-1">Value Score</div>
+            <div className={`text-sm font-bold ${
+              (summary.value_prediction?.score ?? 0) >= 0.7 ? 'text-green-400' :
+              (summary.value_prediction?.score ?? 0) >= 0.4 ? 'text-yellow-400' : 'text-red-400'
+            }`}>
+              {summary.value_prediction?.score ?? '—'}
+            </div>
+            {summary.value_prediction?.will_return != null && (
+              <div className="text-[10px] text-gray-600">
+                {summary.value_prediction.will_return ? 'Likely to return' : 'Unlikely to return'}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Legacy summary badges (old format) */}
+      {summary && !summary.archetype && summary.initial_understanding && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-3 text-center">
             <div className="text-[10px] text-gray-500 mb-1">Initial Understanding</div>
@@ -235,16 +278,16 @@ export default function SessionTimeline({ session, onBack }: Props) {
           </div>
           <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-3 text-center">
             <div className="text-[10px] text-gray-500 mb-1">Final Understanding</div>
-            <div className="text-sm font-bold text-white">{summary.final_understanding}</div>
+            <div className="text-sm font-bold text-white">{summary.final_understanding || '—'}</div>
           </div>
           <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-3 text-center">
             <div className="text-[10px] text-gray-500 mb-1">Learning Progression</div>
-            <div className="text-sm font-bold text-white">{summary.learning_progression.replace('_', ' ')}</div>
+            <div className="text-sm font-bold text-white">{summary.learning_progression?.replace('_', ' ') || '—'}</div>
           </div>
           <div className="rounded-lg border border-gray-800 bg-gray-900/50 p-3 text-center">
             <div className="text-[10px] text-gray-500 mb-1">Learning Onset</div>
             <div className="text-sm font-bold text-white">
-              {summary.learning_onset_seconds >= 0 ? `${summary.learning_onset_seconds}s` : '—'}
+              {summary.learning_onset_seconds != null && summary.learning_onset_seconds >= 0 ? `${summary.learning_onset_seconds}s` : '—'}
             </div>
           </div>
         </div>
@@ -441,9 +484,9 @@ export default function SessionTimeline({ session, onBack }: Props) {
       {summary && (
         <div className="grid gap-4 sm:grid-cols-3">
           {[
-            { title: 'Functional Issues', items: summary.functional_issues, color: 'text-red-400', dot: 'bg-red-400' },
-            { title: 'Design Gaps', items: summary.design_gaps, color: 'text-yellow-400', dot: 'bg-yellow-400' },
-            { title: 'Frustration Signals', items: summary.frustration_signals, color: 'text-orange-400', dot: 'bg-orange-400' },
+            { title: 'Functional Issues', items: summary.functional_issues || [], color: 'text-red-400', dot: 'bg-red-400' },
+            { title: 'Design Gaps', items: summary.design_gaps || [], color: 'text-yellow-400', dot: 'bg-yellow-400' },
+            { title: 'Frustration Signals', items: summary.frustration_signals || [], color: 'text-orange-400', dot: 'bg-orange-400' },
           ].map(({ title, items, color, dot }) => (
             <div key={title} className="rounded-lg border border-gray-800 bg-gray-900/50 p-4">
               <h4 className={`text-[10px] font-semibold uppercase tracking-wider mb-2 ${color}`}>

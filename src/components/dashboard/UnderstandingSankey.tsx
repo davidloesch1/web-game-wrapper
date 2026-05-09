@@ -19,7 +19,9 @@ const LEVEL_LABELS: Record<string, string> = {
 }
 
 export default function UnderstandingSankey({ sessions }: Props) {
-  const summarized = sessions.filter((s) => s.summary)
+  const summarized = sessions.filter(
+    (s) => s.summary?.initial_understanding && s.summary?.final_understanding,
+  )
   if (summarized.length === 0) {
     return (
       <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
@@ -32,8 +34,8 @@ export default function UnderstandingSankey({ sessions }: Props) {
   // Count flows: initial → final
   const flows: Record<string, number> = {}
   for (const s of summarized) {
-    const from = s.summary!.initial_understanding
-    const to = s.summary!.final_understanding
+    const from = s.summary!.initial_understanding!
+    const to = s.summary!.final_understanding!
     const key = `${from}→${to}`
     flows[key] = (flows[key] || 0) + 1
   }
@@ -41,8 +43,8 @@ export default function UnderstandingSankey({ sessions }: Props) {
   const leftCounts: Record<string, number> = {}
   const rightCounts: Record<string, number> = {}
   for (const s of summarized) {
-    const from = s.summary!.initial_understanding
-    const to = s.summary!.final_understanding
+    const from = s.summary!.initial_understanding!
+    const to = s.summary!.final_understanding!
     leftCounts[from] = (leftCounts[from] || 0) + 1
     rightCounts[to] = (rightCounts[to] || 0) + 1
   }
