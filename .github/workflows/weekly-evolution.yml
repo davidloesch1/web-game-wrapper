@@ -3,10 +3,16 @@ name: Weekly Evolution Pipeline
 on:
   schedule:
     - cron: '0 6 * * 1'  # Every Monday at 6am UTC
-  workflow_dispatch: {}   # Manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      site_id:
+        description: 'Site to evolve (matches filename in pipeline/sites/)'
+        required: false
+        default: 'minesweeper'
+        type: string
 
 permissions:
-  contents: write        # Needed to push experiments.json updates
+  contents: write
 
 jobs:
   evolve:
@@ -36,10 +42,12 @@ jobs:
 
       - name: Run evolution pipeline
         env:
+          SITE_ID: ${{ inputs.site_id || 'minesweeper' }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           BIGQUERY_CREDENTIALS: ${{ secrets.BIG_QUERY_CREDENTIALS }}
           FULLSTORY_API_KEY: ${{ secrets.FULLSTORY_API_KEY }}
           GAME_REPO_URL: https://x-access-token:${{ secrets.GAME_REPO_PAT }}@github.com/davidloesch1/web-game.git
+          GAME_REPO_PAT: ${{ secrets.GAME_REPO_PAT }}
         run: python run.py
 
       - name: Upload pipeline logs

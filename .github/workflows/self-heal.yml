@@ -9,6 +9,11 @@ on:
         description: 'JSON error payload (for manual testing)'
         required: true
         type: string
+      site_id:
+        description: 'Site to heal (matches filename in pipeline/sites/)'
+        required: false
+        default: 'minesweeper'
+        type: string
 
 permissions:
   contents: write
@@ -41,22 +46,23 @@ jobs:
 
       - name: Run self-healing pipeline
         env:
+          SITE_ID: ${{ inputs.site_id || 'minesweeper' }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GAME_REPO_URL: https://x-access-token:${{ secrets.GAME_REPO_PAT }}@github.com/davidloesch1/web-game.git
           GAME_REPO_PAT: ${{ secrets.GAME_REPO_PAT }}
           ERROR_PAYLOAD: ${{ github.event_name == 'repository_dispatch' && toJson(github.event.client_payload) || inputs.error_payload }}
         run: python -c "
-import json, os, sys
-sys.path.insert(0, '.')
-from agents.site_reliability import run
-payload = json.loads(os.environ['ERROR_PAYLOAD'])
-result = run(payload)
-print(json.dumps(result, indent=2))
-if result.get('pr_url'):
-    print(f\"::notice::PR created: {result['pr_url']}\")
-elif result.get('action_taken') == 'skipped':
-    print(f\"::notice::Skipped: {result.get('reason', 'N/A')}\")
-"
+          import json, os, sys
+          sys.path.insert(0, '.')
+          from agents.site_reliability import run
+          payload = json.loads(os.environ['ERROR_PAYLOAD'])
+          result = run(payload)
+          print(json.dumps(result, indent=2))
+          if result.get('pr_url'):
+              print(f\"::notice::PR created: {result['pr_url']}\")
+          elif result.get('action_taken') == 'skipped':
+              print(f\"::notice::Skipped: {result.get('reason', 'N/A')}\")
+          "
 
       - name: Commit healing log
         if: always()

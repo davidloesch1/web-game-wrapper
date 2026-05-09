@@ -1,4 +1,4 @@
-"""Data Scientist agent — analyzes weekly session data and produces insights."""
+"""Data Scientist agent — analyzes session data and produces insights."""
 
 import json
 from pathlib import Path
@@ -12,24 +12,18 @@ def run(
     session_data: list[dict],
     experiment_history: list[dict],
     qualitative_report: dict | None = None,
+    site_config: dict | None = None,
 ) -> dict:
-    """Analyze player behavior data and return an analysis report.
-
-    Receives both quantitative data (BigQuery sessions) and qualitative
-    data (FullStory AI session summaries) for a complete picture of
-    player behavior and experience quality.
+    """Analyze user behavior data and return an analysis report.
 
     Args:
         session_data: List of session records from BigQuery.
         experiment_history: List of past experiment records.
-        qualitative_report: Aggregated FullStory AI session summaries
-            with player comprehension, design gaps, and frustration data.
+        qualitative_report: Aggregated FullStory AI session summaries.
+        site_config: Parsed site config dict (from site_config.load_site_config).
 
     Returns:
-        Analysis report dict with keys: summary, player_clusters,
-        key_correlations, dropoff_patterns, ab_comparison,
-        session_value_breakdown, qualitative_insights, recommendations,
-        sample_size, confidence_notes.
+        Analysis report dict.
     """
     system_prompt = load_prompt("data_scientist")
     source_of_truth = SOURCE_OF_TRUTH.read_text()
@@ -43,9 +37,12 @@ def run(
         "source_of_truth": source_of_truth,
     }
 
+    if site_config:
+        payload["site_config"] = site_config
+
     if qualitative_report and qualitative_report.get("total_summarized", 0) > 0:
         payload["qualitative_session_summaries"] = qualitative_report
 
-    user_message = json.dumps(payload, indent=2)
+    user_message = json.dumps(payload, indent=2, default=str)
 
     return call_gemini(system_prompt, user_message)

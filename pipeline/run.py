@@ -3,18 +3,19 @@
 Pulls data, runs the AI agent team, and publishes the next experiment.
 Designed to run as a GitHub Action on a weekly cron schedule.
 
-Lifecycle per week:
-  1.  Pull session data from BigQuery (quantitative)
-  1b. Generate AI session summaries via FullStory (qualitative)
+Lifecycle per cycle:
+  1.  Load site config for the target site
+  1b. Pull session data from BigQuery (quantitative)
+  1c. Generate AI session summaries via FullStory (qualitative)
   2.  Data Scientist analyzes both quantitative + qualitative data
   3.  Close previous experiment (determine winner from analysis)
-  4.  Merge winner into main if B won; tag + bump experiment.json either way
+  4.  Merge winner into main if challenger won; tag + bump either way
   5.  PM proposes next experiment, Ethics + Judge approve
-  6.  Engineering agent creates variant-B challenger branch
+  6.  Engineering agent creates challenger branch
   7.  Update experiments.json and push (wrapper site updates)
 
-Main is always variant A (control).  Variant-B branches are kept
-permanently as playable archives via Vercel preview URLs.
+Main is always the control.  Challenger branches are kept permanently
+as playable archives via deploy preview URLs.
 """
 
 import json
@@ -44,6 +45,7 @@ from agents.session_summarizer import (
     run as summarize_sessions,
     aggregate_summaries,
 )
+from site_config import load_site_config
 
 REPO_ROOT = Path(__file__).parent.parent
 PIPELINE_DIR = Path(__file__).parent
@@ -87,15 +89,15 @@ def _bq_table(name: str) -> str:
     return f"`{BQ_PROJECT}.{BQ_DATASET}.{name}`"
 
 
-def pull_bigquery_data(week_start: str, week_end: str, experiment_week: int | None = None) -> list[dict]:
+def pull_bigquery_data(week_start: str, week_end: str, experiment_week: int | None = None, site_config: dict | None = None) -> list[dict]:
     """Pull session data from BigQuery for the given date range.
 
     Queries FullStory's Ready to Analyze Views schema. Uses the
-    page_properties table to identify game sessions by experiment_week
-    and experiment_variant (set by the game via experiment.json).
+    page_properties table to identify sessions by experiment metadata
+    (set by the site via experiment.json / page properties).
 
-    For baseline weeks (no experiment running), falls back to filtering
-    by the game's production host.
+    For baseline cycles (no experiment running), falls back to filtering
+    by the site's production host.
 
     Returns a list of session-level dicts combining page view duration,
     click behavior, fingerprint data, and experiment variant assignment.
@@ -177,6 +179,7 @@ def pull_bigquery_data(week_start: str, week_end: str, experiment_week: int | No
         )
     else:
         # Baseline / no experiment — fall back to production host filtering
+        production_host = (site_config or {}).get("production_url", "web-game-nine-lake.vercel.app")
         session_query = f"""
         SELECT
           pv.session_id,
@@ -199,7 +202,7 @@ def pull_bigquery_data(week_start: str, week_end: str, experiment_week: int | No
         LEFT JOIN {_bq_table('source_properties')} sp
           ON pv.event_id = sp.event_id
         WHERE pv.event_time BETWEEN @start AND @end
-          AND sp.url_host = 'web-game-nine-lake.vercel.app'
+          AND sp.url_host = @production_host
         ORDER BY pv.event_time
         """
 
@@ -213,7 +216,7 @@ def pull_bigquery_data(week_start: str, week_end: str, experiment_week: int | No
         LEFT JOIN {_bq_table('source_properties')} sp
           ON c.event_id = sp.event_id
         WHERE c.event_time BETWEEN @start AND @end
-          AND sp.url_host = 'web-game-nine-lake.vercel.app'
+          AND sp.url_host = @production_host
         GROUP BY c.session_id
         """
 
@@ -228,7 +231,7 @@ def pull_bigquery_data(week_start: str, week_end: str, experiment_week: int | No
         LEFT JOIN {_bq_table('source_properties')} sp
           ON ce.event_id = sp.event_id
         WHERE ce.event_time BETWEEN @start AND @end
-          AND sp.url_host = 'web-game-nine-lake.vercel.app'
+          AND sp.url_host = @production_host
         ORDER BY ce.event_time
         """
 
@@ -236,6 +239,7 @@ def pull_bigquery_data(week_start: str, week_end: str, experiment_week: int | No
             query_parameters=[
                 bigquery.ScalarQueryParameter("start", "TIMESTAMP", week_start),
                 bigquery.ScalarQueryParameter("end", "TIMESTAMP", week_end),
+                bigquery.ScalarQueryParameter("production_host", "STRING", production_host),
             ]
         )
 
@@ -421,6 +425,14 @@ def run_pipeline():
 
     # --- Setup ---
     configure_llm()
+
+    site_id = os.environ.get("SITE_ID", "minesweeper")
+    site_cfg = load_site_config(site_id)
+    if not site_cfg:
+        logger.error("Could not load site config for '%s'", site_id)
+        sys.exit(1)
+    logger.info("Site: %s (%s)", site_cfg.get("name", site_id), site_cfg.get("repo"))
+
     experiment_data = load_experiments()
     current_week = experiment_data["currentWeek"]
     next_week = current_week + 1
@@ -437,6 +449,7 @@ def run_pipeline():
             running_experiment["startDate"],
             running_experiment["endDate"],
             experiment_week=exp_week if exp_week != 1 else None,
+            site_config=site_cfg,
         )
         logger.info("Pulled %d sessions from BigQuery", len(session_data))
     else:
@@ -463,7 +476,7 @@ def run_pipeline():
 
     # --- Stage 2: Data Scientist analysis ---
     logger.info("--- Stage 2: Data Scientist analysis ---")
-    analysis = analyze_data(session_data, experiment_history, qualitative_report)
+    analysis = analyze_data(session_data, experiment_history, qualitative_report, site_config=site_cfg)
     logger.info("Analysis summary: %s", analysis.get("summary", "N/A"))
 
     # --- Stage 3: Close previous experiment and advance main ---
@@ -472,7 +485,7 @@ def run_pipeline():
         winner = close_experiment(experiment_data, analysis)
         if winner and current_week > 1:
             logger.info("Winner: variant %s — advancing main for week %d", winner.upper(), next_week)
-            merge_winner(winner, current_week, next_week)
+            merge_winner(winner, current_week, next_week, site_config=site_cfg)
         elif winner and current_week == 1:
             logger.info("Baseline week — skipping merge (no experiment branches exist)")
         else:
@@ -488,7 +501,7 @@ def run_pipeline():
     for attempt in range(1, MAX_PROPOSAL_ATTEMPTS + 1):
         logger.info("Proposal attempt %d/%d", attempt, MAX_PROPOSAL_ATTEMPTS)
 
-        proposal = propose_experiment(analysis, experiment_history, feedback)
+        proposal = propose_experiment(analysis, experiment_history, feedback, site_config=site_cfg)
         logger.info("Hypothesis: %s", proposal.get("hypothesis", "N/A"))
 
         # Handle exception requests from the PM (side-channel, non-blocking)
@@ -500,13 +513,15 @@ def run_pipeline():
         files_changed = proposal.get("files_changed", [])
         estimated_lines = proposal.get("estimated_lines_changed", 0)
         change_category = proposal.get("change_category", "config")
+        max_files = site_cfg.get("max_files", 1)
+        max_lines = site_cfg.get("max_lines", 50)
 
-        if len(files_changed) > 1:
-            feedback = "Change scope violation: experiment modifies more than 1 file. Limit to a single file."
+        if len(files_changed) > max_files:
+            feedback = f"Change scope violation: experiment modifies {len(files_changed)} files (limit: {max_files})."
             logger.warning("SCOPE REJECTED: %s", feedback)
             continue
-        if estimated_lines > 50:
-            feedback = f"Change scope violation: estimated {estimated_lines} lines changed exceeds 50-line limit."
+        if estimated_lines > max_lines:
+            feedback = f"Change scope violation: estimated {estimated_lines} lines changed exceeds {max_lines}-line limit."
             logger.warning("SCOPE REJECTED: %s", feedback)
             continue
         if change_category == "structural":
@@ -514,7 +529,7 @@ def run_pipeline():
             logger.warning("SCOPE REJECTED: %s", feedback)
             continue
 
-        ethics = review_ethics(proposal)
+        ethics = review_ethics(proposal, site_config=site_cfg)
         if not ethics.get("approved", False):
             concerns = ethics.get("concerns", [])
             logger.warning("Ethics REJECTED: %s", concerns)
@@ -523,7 +538,7 @@ def run_pipeline():
 
         logger.info("Ethics APPROVED")
 
-        judgment = judge_experiment(proposal, experiment_history)
+        judgment = judge_experiment(proposal, experiment_history, site_config=site_cfg)
         score = judgment.get("score", 0)
         logger.info("Judge score: %d/100", score)
 
@@ -547,7 +562,7 @@ def run_pipeline():
 
     # --- Stage 5: Engineering implementation ---
     logger.info("--- Stage 5: Engineering implementation (variant B only) ---")
-    deployment = implement_experiment(approved_proposal, next_week)
+    deployment = implement_experiment(approved_proposal, next_week, site_config=site_cfg)
     logger.info(
         "Deployed: A=%s (main), B=%s",
         deployment.get("variant_a_url"),
