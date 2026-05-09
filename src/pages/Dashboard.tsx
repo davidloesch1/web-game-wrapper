@@ -200,8 +200,9 @@ export default function Dashboard() {
                     <th className="pb-2 pr-4 font-medium">Active Time</th>
                     <th className="pb-2 pr-4 font-medium">Clicks</th>
                     <th className="pb-2 pr-4 font-medium">Variant</th>
-                    <th className="pb-2 pr-4 font-medium">Progression</th>
-                    <th className="pb-2 pr-4 font-medium">Engagement</th>
+                    <th className="pb-2 pr-4 font-medium">Archetype</th>
+                    <th className="pb-2 pr-4 font-medium">Intent</th>
+                    <th className="pb-2 pr-4 font-medium">Value</th>
                     <th className="pb-2 font-medium">Fingerprints</th>
                   </tr>
                 </thead>
@@ -233,11 +234,37 @@ export default function Dashboard() {
                           <span className="text-gray-600">—</span>
                         )}
                       </td>
-                      <td className="py-2 pr-4 text-gray-300">
-                        {s.summary?.learning_progression?.replace('_', ' ') || '—'}
+                      <td className="py-2 pr-4 text-gray-300 capitalize">
+                        {s.summary?.archetype?.primary?.replace('_', ' ') || '—'}
+                        {s.summary?.archetype?.confidence != null && (
+                          <span className="text-gray-600 ml-1 text-[10px]">
+                            {Math.round(s.summary.archetype.confidence * 100)}%
+                          </span>
+                        )}
                       </td>
-                      <td className="py-2 pr-4 text-gray-300">
-                        {s.summary?.engagement_quality?.replace('_', ' ') || '—'}
+                      <td className="py-2 pr-4 text-gray-300 capitalize">
+                        {s.summary?.intent?.primary?.replace('_', ' ') || '—'}
+                        {s.summary?.intent?.fulfilled != null && (
+                          <span className={s.summary.intent.fulfilled ? 'text-green-400 ml-1' : 'text-red-400 ml-1'}>
+                            {s.summary.intent.fulfilled ? '✓' : '✗'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-4">
+                        {s.summary?.value_prediction?.score != null ? (
+                          <span className={
+                            s.summary.value_prediction.score >= 0.7 ? 'text-green-400' :
+                            s.summary.value_prediction.score >= 0.4 ? 'text-yellow-400' :
+                            'text-red-400'
+                          }>
+                            {s.summary.value_prediction.score}
+                            {s.summary.value_prediction.will_return && (
+                              <span className="text-gray-500 ml-1">↩</span>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-gray-600">—</span>
+                        )}
                       </td>
                       <td className="py-2 text-gray-400">
                         {s.fingerprint_events?.length || 0}

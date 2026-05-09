@@ -393,6 +393,69 @@ def _serialize_session(session: dict) -> dict:
     return result
 
 
+def _aggregate_behavioral_profiles(summaries: list[dict]) -> dict:
+    """Aggregate behavioral intelligence data from the new profile format.
+
+    Produces distributions for archetypes, intents, dominant states,
+    value predictions, and per-fingerprint state frequencies.
+    """
+    archetype_counts: dict[str, int] = {}
+    intent_counts: dict[str, int] = {}
+    dominant_state_counts: dict[str, int] = {}
+    state_counts: dict[str, int] = {}
+    value_scores: list[float] = []
+    will_return_count = 0
+    intent_fulfilled_count = 0
+    total_with_profile = 0
+
+    for s in summaries:
+        archetype = s.get("archetype")
+        if not isinstance(archetype, dict):
+            continue
+        total_with_profile += 1
+
+        a_primary = archetype.get("primary", "unknown")
+        archetype_counts[a_primary] = archetype_counts.get(a_primary, 0) + 1
+
+        intent = s.get("intent", {})
+        if isinstance(intent, dict):
+            i_primary = intent.get("primary", "unknown")
+            intent_counts[i_primary] = intent_counts.get(i_primary, 0) + 1
+            if intent.get("fulfilled"):
+                intent_fulfilled_count += 1
+
+        ds = s.get("dominant_state", "unknown")
+        dominant_state_counts[ds] = dominant_state_counts.get(ds, 0) + 1
+
+        vp = s.get("value_prediction", {})
+        if isinstance(vp, dict):
+            score = vp.get("score")
+            if isinstance(score, (int, float)):
+                value_scores.append(score)
+            if vp.get("will_return"):
+                will_return_count += 1
+
+        for ann in s.get("fingerprint_annotations", []):
+            ps = ann.get("primary_state", "unknown")
+            state_counts[ps] = state_counts.get(ps, 0) + 1
+
+    if not total_with_profile:
+        return {"total_profiled": 0}
+
+    return {
+        "total_profiled": total_with_profile,
+        "archetype_distribution": archetype_counts,
+        "intent_distribution": intent_counts,
+        "intent_fulfilled_pct": round(intent_fulfilled_count / total_with_profile * 100, 1),
+        "dominant_state_distribution": dominant_state_counts,
+        "fingerprint_state_distribution": state_counts,
+        "value_prediction": {
+            "mean_score": round(sum(value_scores) / len(value_scores), 3) if value_scores else None,
+            "will_return_pct": round(will_return_count / total_with_profile * 100, 1),
+        },
+    }
+
+
 def main():
     logger.info("=== Dashboard Data Backfill ===")
 
@@ -429,6 +492,9 @@ def main():
         if sid:
             summary_by_session[sid] = s
 
+    # Compute behavioral intelligence aggregates
+    behavioral_summary = _aggregate_behavioral_profiles(session_summaries)
+
     # Compute 2D projections for fingerprint scatter
     logger.info("--- Computing 2D fingerprint projections ---")
     projection_result = project_fingerprints_2d(sessions)
@@ -462,6 +528,7 @@ def main():
         "total_sessions": len(sessions_for_dashboard),
         "total_summarized": qualitative_report.get("total_summarized", 0),
         "qualitative_report": qualitative_report,
+        "behavioral_summary": behavioral_summary,
         "experiments": experiments.get("experiments", []),
         "goal": experiments.get("goal", ""),
         "current_week": experiments.get("currentWeek", 1),

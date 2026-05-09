@@ -15,7 +15,7 @@
  */
 
 const FS_API_BASE = 'https://api.fullstory.com';
-const DEFAULT_PROFILE_ID = '2e07d0c0-34b1-441c-96ac-c450915a8f9d';
+const DEFAULT_PROFILE_ID = 'd904a09b-80d2-4d38-81bf-6784a500da6a';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {

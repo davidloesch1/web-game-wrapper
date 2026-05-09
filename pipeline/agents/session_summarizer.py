@@ -21,9 +21,14 @@ from datetime import datetime, timezone
 logger = logging.getLogger(__name__)
 
 FULLSTORY_API_BASE = "https://api.fullstory.com"
+BEHAVIORAL_PROFILE_ID = os.environ.get(
+    "FULLSTORY_BEHAVIORAL_PROFILE_ID",
+    "d904a09b-80d2-4d38-81bf-6784a500da6a",
+)
+LEGACY_PROFILE_ID = "2e07d0c0-34b1-441c-96ac-c450915a8f9d"
 PROMPT_PROFILE_ID = os.environ.get(
     "FULLSTORY_PROMPT_PROFILE_ID",
-    "2e07d0c0-34b1-441c-96ac-c450915a8f9d",
+    BEHAVIORAL_PROFILE_ID,
 )
 MAX_SESSIONS_TO_SUMMARIZE = int(os.environ.get("MAX_SESSION_SUMMARIES", "50"))
 REQUEST_DELAY_SECONDS = 1.5

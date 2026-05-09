@@ -6,20 +6,88 @@ export interface FingerprintEvent {
   event_time: string
 }
 
+export type BehavioralState =
+  | 'engaged'
+  | 'confused'
+  | 'frustrated'
+  | 'exploring'
+  | 'deliberate'
+  | 'idle'
+  | 'rushing'
+  | 'learning'
+
+export interface BehavioralScores {
+  engaged?: number
+  confused?: number
+  frustrated?: number
+  exploring?: number
+  deliberate?: number
+  idle?: number
+  rushing?: number
+  learning?: number
+}
+
+export interface FingerprintAnnotation {
+  fingerprint_index: number
+  timestamp_description: string
+  primary_state: BehavioralState
+  scores: BehavioralScores
+}
+
+export interface Archetype {
+  primary: string
+  confidence: number
+  reasoning: string
+  secondary?: string
+}
+
+export interface Intent {
+  primary: string
+  confidence: number
+  reasoning: string
+  fulfilled: boolean
+  secondary?: string
+}
+
+export interface ValuePrediction {
+  score: number
+  will_return: boolean
+  reasoning: string
+}
+
 export interface SessionSummary {
   session_id: string
-  initial_understanding: 'none' | 'partial' | 'solid'
-  final_understanding: 'none' | 'partial' | 'solid' | 'advanced'
-  learning_onset_seconds: number
-  learning_curve_stage: 'confused' | 'learning' | 'competent' | 'advanced'
-  understood_mechanics: boolean
-  learning_progression: 'no_change' | 'progressed' | 'regressed' | 'mastered_quickly'
-  engagement_quality: 'bounce' | 'shallow' | 'moderate' | 'deep' | 'flow_state'
-  functional_issues: string[]
-  design_gaps: string[]
-  frustration_signals: string[]
   session_narrative: string
+  fingerprint_annotations?: FingerprintAnnotation[]
+  dominant_state?: BehavioralState
+  archetype?: Archetype
+  intent?: Intent
+  value_prediction?: ValuePrediction
+  frustration_signals?: string[]
+  // Legacy fields (from old profile)
+  initial_understanding?: 'none' | 'partial' | 'solid'
+  final_understanding?: 'none' | 'partial' | 'solid' | 'advanced'
+  learning_onset_seconds?: number
+  learning_curve_stage?: 'confused' | 'learning' | 'competent' | 'advanced'
+  understood_mechanics?: boolean
+  learning_progression?: 'no_change' | 'progressed' | 'regressed' | 'mastered_quickly'
+  engagement_quality?: 'bounce' | 'shallow' | 'moderate' | 'deep' | 'flow_state'
+  functional_issues?: string[]
+  design_gaps?: string[]
   experiment_variant?: string
+}
+
+export interface BehavioralSummary {
+  total_profiled: number
+  archetype_distribution?: Record<string, number>
+  intent_distribution?: Record<string, number>
+  intent_fulfilled_pct?: number
+  dominant_state_distribution?: Record<string, number>
+  fingerprint_state_distribution?: Record<string, number>
+  value_prediction?: {
+    mean_score: number | null
+    will_return_pct: number
+  }
 }
 
 export interface Projection {
@@ -103,6 +171,7 @@ export interface DashboardData {
   total_sessions: number
   total_summarized: number
   qualitative_report: QualitativeReport
+  behavioral_summary?: BehavioralSummary
   experiments: Array<{
     week: number
     status: string

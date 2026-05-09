@@ -12,6 +12,7 @@ import {
 import type { DashboardSession, Projection } from '../../types/dashboard'
 
 type ViewMode = 'fingerprints' | 'sessions'
+type ColorMode = 'archetype' | 'intent' | 'dominant_state' | 'value'
 
 interface Props {
   sessions: DashboardSession[]
@@ -20,20 +21,46 @@ interface Props {
   onSelectSession: (sessionId: string) => void
 }
 
-const PROGRESSION_COLORS: Record<string, string> = {
-  mastered_quickly: '#22c55e',
-  progressed: '#06b6d4',
-  no_change: '#eab308',
-  regressed: '#ef4444',
-  unknown: '#6b7280',
+const ARCHETYPE_COLORS: Record<string, string> = {
+  methodical: '#06b6d4',
+  impulsive: '#f97316',
+  cautious: '#8b5cf6',
+  optimizer: '#22c55e',
+  tourist: '#6b7280',
+  power_user: '#eab308',
+  explorer: '#3b82f6',
+  completionist: '#ec4899',
+  unknown: '#374151',
 }
 
-const PROGRESSION_LABELS: Record<string, string> = {
-  mastered_quickly: 'Mastered Quickly',
-  progressed: 'Progressed',
-  no_change: 'No Change',
-  regressed: 'Regressed',
-  unknown: 'No Summary',
+const INTENT_COLORS: Record<string, string> = {
+  evaluating: '#8b5cf6',
+  completing: '#22c55e',
+  returning: '#06b6d4',
+  comparing: '#f97316',
+  entertainment: '#ec4899',
+  problem_solving: '#ef4444',
+  learning: '#3b82f6',
+  habitual: '#eab308',
+  unknown: '#374151',
+}
+
+const STATE_COLORS: Record<string, string> = {
+  engaged: '#22c55e',
+  confused: '#f97316',
+  frustrated: '#ef4444',
+  exploring: '#3b82f6',
+  deliberate: '#06b6d4',
+  idle: '#6b7280',
+  rushing: '#eab308',
+  learning: '#8b5cf6',
+  unknown: '#374151',
+}
+
+function valueToColor(score: number): string {
+  if (score >= 0.7) return '#22c55e'
+  if (score >= 0.4) return '#eab308'
+  return '#ef4444'
 }
 
 export default function ConstellationScatter({
@@ -43,6 +70,7 @@ export default function ConstellationScatter({
   onSelectSession,
 }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>('sessions')
+  const [colorMode, setColorMode] = useState<ColorMode>('archetype')
 
   const summaryMap = new Map(
     sessions.filter((s) => s.summary).map((s) => [s.session_id, s.summary!]),
@@ -57,8 +85,13 @@ export default function ConstellationScatter({
       x: p.x,
       y: p.y,
       sessionId: p.session_id,
-      progression: summary?.learning_progression || 'unknown',
-      engagement: summary?.engagement_quality || 'unknown',
+      archetype: summary?.archetype?.primary || 'unknown',
+      archetypeConfidence: summary?.archetype?.confidence,
+      intent: summary?.intent?.primary || 'unknown',
+      intentFulfilled: summary?.intent?.fulfilled,
+      dominantState: summary?.dominant_state || 'unknown',
+      valueScore: summary?.value_prediction?.score,
+      willReturn: summary?.value_prediction?.will_return,
       variant: p.experiment_variant || 'unknown',
       duration: session?.active_duration_millis
         ? Math.round(session.active_duration_millis / 1000)
@@ -69,6 +102,42 @@ export default function ConstellationScatter({
       eventTime: p.event_time || null,
     }
   })
+
+  function getDotColor(entry: (typeof scatterData)[0]): string {
+    switch (colorMode) {
+      case 'archetype':
+        return ARCHETYPE_COLORS[entry.archetype] || ARCHETYPE_COLORS.unknown
+      case 'intent':
+        return INTENT_COLORS[entry.intent] || INTENT_COLORS.unknown
+      case 'dominant_state':
+        return STATE_COLORS[entry.dominantState] || STATE_COLORS.unknown
+      case 'value':
+        return entry.valueScore != null
+          ? valueToColor(entry.valueScore)
+          : '#374151'
+    }
+  }
+
+  function getActiveLegend(): Record<string, string> {
+    switch (colorMode) {
+      case 'archetype':
+        return ARCHETYPE_COLORS
+      case 'intent':
+        return INTENT_COLORS
+      case 'dominant_state':
+        return STATE_COLORS
+      case 'value':
+        return { 'High (≥0.7)': '#22c55e', 'Medium': '#eab308', 'Low (<0.4)': '#ef4444' }
+    }
+  }
+
+  const activeLegend = getActiveLegend()
+  const presentKeys = new Set(scatterData.map((d) => {
+    if (colorMode === 'value') return d.valueScore != null ? (d.valueScore >= 0.7 ? 'High (≥0.7)' : d.valueScore >= 0.4 ? 'Medium' : 'Low (<0.4)') : ''
+    if (colorMode === 'archetype') return d.archetype
+    if (colorMode === 'intent') return d.intent
+    return d.dominantState
+  }))
 
   const CustomTooltip = ({
     active,
@@ -84,10 +153,13 @@ export default function ConstellationScatter({
         <div className="flex items-center gap-2 mb-1">
           <span
             className="inline-block h-2.5 w-2.5 rounded-full"
-            style={{ backgroundColor: PROGRESSION_COLORS[d.progression] }}
+            style={{ backgroundColor: getDotColor(d) }}
           />
-          <span className="font-semibold text-gray-200">
-            {PROGRESSION_LABELS[d.progression]}
+          <span className="font-semibold text-gray-200 capitalize">
+            {colorMode === 'archetype' && d.archetype.replace('_', ' ')}
+            {colorMode === 'intent' && d.intent.replace('_', ' ')}
+            {colorMode === 'dominant_state' && d.dominantState}
+            {colorMode === 'value' && (d.valueScore != null ? `Value: ${d.valueScore}` : 'No score')}
           </span>
           {d.variant !== 'unknown' && (
             <span className="ml-auto text-gray-500">
@@ -95,6 +167,27 @@ export default function ConstellationScatter({
             </span>
           )}
         </div>
+        {d.archetype !== 'unknown' && colorMode !== 'archetype' && (
+          <p className="text-gray-400">Archetype: <span className="text-gray-300 capitalize">{d.archetype.replace('_', ' ')}</span></p>
+        )}
+        {d.intent !== 'unknown' && colorMode !== 'intent' && (
+          <p className="text-gray-400">
+            Intent: <span className="text-gray-300 capitalize">{d.intent.replace('_', ' ')}</span>
+            {d.intentFulfilled != null && (
+              <span className={d.intentFulfilled ? 'text-green-400 ml-1' : 'text-red-400 ml-1'}>
+                {d.intentFulfilled ? '✓ fulfilled' : '✗ unfulfilled'}
+              </span>
+            )}
+          </p>
+        )}
+        {d.willReturn != null && colorMode !== 'value' && (
+          <p className="text-gray-400">
+            Value: <span className="text-gray-300">{d.valueScore}</span>
+            <span className={d.willReturn ? 'text-green-400 ml-1' : 'text-red-400 ml-1'}>
+              {d.willReturn ? '→ likely return' : '→ unlikely return'}
+            </span>
+          </p>
+        )}
         {viewMode === 'fingerprints' && d.fingerprintIndex != null && (
           <p className="text-gray-400">
             Fingerprint #{d.fingerprintIndex + 1}
@@ -113,9 +206,6 @@ export default function ConstellationScatter({
         {d.duration !== null && (
           <p className="text-gray-400">Active time: {d.duration}s</p>
         )}
-        {d.engagement !== 'unknown' && (
-          <p className="text-gray-400">Engagement: {d.engagement}</p>
-        )}
         {d.narrative && (
           <p className="mt-1 text-gray-300 leading-relaxed">{d.narrative}</p>
         )}
@@ -126,21 +216,28 @@ export default function ConstellationScatter({
 
   const descriptions: Record<ViewMode, string> = {
     sessions:
-      'Each dot is one session — position from average behavioral fingerprint, color from learning progression',
+      'Each dot is one session — position from behavioral fingerprint centroid',
     fingerprints:
-      'Each dot is one fingerprint snapshot — similar positions mean similar player behavior at that moment',
+      'Each dot is one fingerprint snapshot — similar positions mean similar behavior at that moment',
+  }
+
+  const colorLabels: Record<ColorMode, string> = {
+    archetype: 'Archetype',
+    intent: 'Intent',
+    dominant_state: 'State',
+    value: 'Value',
   }
 
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between flex-wrap gap-2">
         <div>
           <h3 className="text-sm font-semibold text-gray-400">
             Session Constellation
           </h3>
           <p className="text-xs text-gray-600 mt-0.5">{descriptions[viewMode]}</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <select
             value={viewMode}
             onChange={(e) => setViewMode(e.target.value as ViewMode)}
@@ -153,20 +250,29 @@ export default function ConstellationScatter({
               By Fingerprint ({projections.length})
             </option>
           </select>
-          <div className="flex gap-3 text-[10px]">
-            {Object.entries(PROGRESSION_LABELS)
-              .filter(([k]) => k !== 'unknown')
-              .map(([key, label]) => (
-                <div key={key} className="flex items-center gap-1">
-                  <span
-                    className="inline-block h-2 w-2 rounded-full"
-                    style={{ backgroundColor: PROGRESSION_COLORS[key] }}
-                  />
-                  <span className="text-gray-500">{label}</span>
-                </div>
-              ))}
-          </div>
+          <select
+            value={colorMode}
+            onChange={(e) => setColorMode(e.target.value as ColorMode)}
+            className="rounded-md border border-gray-700 bg-gray-800 px-2.5 py-1 text-xs text-gray-300 focus:border-cyan-500 focus:outline-none"
+          >
+            {Object.entries(colorLabels).map(([k, v]) => (
+              <option key={k} value={k}>Color: {v}</option>
+            ))}
+          </select>
         </div>
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 mb-3 text-[10px]">
+        {Object.entries(activeLegend)
+          .filter(([k]) => k !== 'unknown' && presentKeys.has(k))
+          .map(([key, color]) => (
+            <div key={key} className="flex items-center gap-1">
+              <span
+                className="inline-block h-2 w-2 rounded-full"
+                style={{ backgroundColor: color }}
+              />
+              <span className="text-gray-500 capitalize">{key.replace('_', ' ')}</span>
+            </div>
+          ))}
       </div>
       <ResponsiveContainer width="100%" height={360}>
         <ScatterChart margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
@@ -198,7 +304,7 @@ export default function ConstellationScatter({
             {scatterData.map((entry, i) => (
               <Cell
                 key={i}
-                fill={PROGRESSION_COLORS[entry.progression]}
+                fill={getDotColor(entry)}
                 fillOpacity={viewMode === 'fingerprints' ? 0.5 : 0.7}
                 r={viewMode === 'fingerprints' ? 4 : 6}
                 cursor="pointer"
