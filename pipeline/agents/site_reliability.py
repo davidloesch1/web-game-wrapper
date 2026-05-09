@@ -144,11 +144,13 @@ def triage(error_payload: dict) -> dict:
         }
 
     # Classify severity
+    has_enriched_context = bool(error_payload.get("session_context") or
+                                error_payload.get("session_summary"))
     if error_type == "uncaught_exception" or user_count >= USER_THRESHOLD:
         severity = "critical"
     elif error_type == "console_error" and session_count >= 2:
         severity = "warning"
-    elif error_type == "network_error" and session_count >= 3:
+    elif error_type == "network_error" and (session_count >= 3 or has_enriched_context):
         severity = "warning"
     else:
         severity = "info"
@@ -208,8 +210,8 @@ def diagnose(error_payload: dict, work_dir: str) -> dict:
     )
     recent_commits = result.stdout if result.returncode == 0 else "(unavailable)"
 
-    system_prompt = load_prompt("site_reliability")
-    user_message = json.dumps({
+    # Build enriched context for AI diagnosis
+    ai_input = {
         "error_message": error_payload.get("error_message", ""),
         "error_type": error_payload.get("error_type", ""),
         "stack_trace": error_payload.get("stack_trace", ""),
@@ -221,7 +223,22 @@ def diagnose(error_payload: dict, work_dir: str) -> dict:
         "source_file": source_file,
         "source_code": source_code,
         "recent_commits": recent_commits,
-    }, indent=2)
+    }
+
+    # Include FullStory session context if the relay enriched the payload
+    session_context = error_payload.get("session_context")
+    if session_context:
+        ai_input["fullstory_session_context"] = session_context
+        logger.info("Including FullStory session context (%d chars)",
+                    len(json.dumps(session_context)))
+
+    session_summary = error_payload.get("session_summary")
+    if session_summary:
+        ai_input["fullstory_session_summary"] = session_summary
+        logger.info("Including FullStory session summary")
+
+    system_prompt = load_prompt("site_reliability")
+    user_message = json.dumps(ai_input, indent=2, default=str)
 
     logger.info("Sending error context to AI for diagnosis (%s, %d chars of source)",
                 source_file, len(source_code))

@@ -16,6 +16,8 @@ A JSON payload containing:
 - **source_file**: The file that likely contains the bug (game.js, style.css, or index.html)
 - **source_code**: The full contents of that file
 - **recent_commits**: Recent git log for context (did a recent change introduce this?)
+- **fullstory_session_context** (if available): The full event timeline from the session, formatted for AI consumption via FullStory's Generate Context API. This includes clicks, page navigations, network requests, console errors, and user interactions leading up to and following the error. Use this to understand what the user was doing when the error occurred.
+- **fullstory_session_summary** (if available): An AI-generated narrative summary of the session from FullStory, including engagement quality, learning progression, frustration signals, design gaps, and functional issues. Use this to understand the broader user experience context around the error.
 
 ## What You Do
 
