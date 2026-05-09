@@ -121,11 +121,13 @@ async function enrichFromFullStory(sessionId, apiKey) {
     const contextResp = await fetch(
       `${FS_API_BASE}/v2/sessions/${encodedId}/context`,
       {
-        method: 'GET',
+        method: 'POST',
         headers: {
           'Authorization': `Basic ${apiKey}`,
           'Accept': 'application/json',
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({}),
       },
     );
     if (contextResp.ok) {
