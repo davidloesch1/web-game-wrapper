@@ -382,6 +382,36 @@ def _create_pr(diagnosis: dict, error_payload: dict, work_dir: str) -> str | Non
         return None
 
 
+def _flatten_payload(payload: dict) -> dict:
+    """Flatten the compact dispatch payload back into a flat dict.
+
+    The webhook relay nests fields under 'impact', 'errors', and 'fullstory'
+    to comply with GitHub's 10-property limit on client_payload.
+    """
+    flat = dict(payload)
+
+    impact = flat.pop("impact", None)
+    if isinstance(impact, dict):
+        flat.setdefault("user_count", impact.get("user_count", 0))
+        flat.setdefault("session_count", impact.get("session_count", 0))
+        flat.setdefault("session_ids", impact.get("session_ids", []))
+        flat.setdefault("source_type", impact.get("source_type", ""))
+
+    errors = flat.pop("errors", None)
+    if isinstance(errors, dict):
+        flat.setdefault("console_errors", errors.get("console_errors", []))
+        flat.setdefault("network_errors", errors.get("network_errors", []))
+
+    fs = flat.pop("fullstory", None)
+    if isinstance(fs, dict):
+        if fs.get("session_context"):
+            flat["session_context"] = fs["session_context"]
+        if fs.get("session_summary"):
+            flat["session_summary"] = fs["session_summary"]
+
+    return flat
+
+
 def run(error_payload: dict, work_dir: str = "/tmp/game-sre") -> dict:
     """Execute the full self-healing pipeline for a detected error.
 
@@ -397,6 +427,11 @@ def run(error_payload: dict, work_dir: str = "/tmp/game-sre") -> dict:
     """
     from agents.llm import configure as configure_llm
     configure_llm()
+
+    # Flatten the compact payload structure from the webhook relay.
+    # The relay nests some fields under 'impact', 'errors', and 'fullstory'
+    # to stay within GitHub's 10-property limit on repository_dispatch.
+    error_payload = _flatten_payload(error_payload)
 
     logger.info("=" * 50)
     logger.info("Self-healing pipeline triggered")

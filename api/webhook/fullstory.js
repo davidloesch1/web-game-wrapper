@@ -81,7 +81,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         event_type: 'fullstory-error',
-        client_payload: payload,
+        client_payload: compactPayload(payload),
       }),
     });
 
@@ -257,4 +257,34 @@ function buildErrorMessage(payload) {
   return parts.length > 0
     ? parts.join(' ')
     : '';
+}
+
+
+/**
+ * GitHub repository_dispatch limits client_payload to 10 top-level keys.
+ * Nest our data into a compact structure that stays under the limit.
+ */
+function compactPayload(payload) {
+  return {
+    error_message: payload.error_message || '',
+    error_type: payload.error_type || '',
+    session_id: payload.session_id || '',
+    url: payload.url || '',
+    stack_trace: payload.stack_trace || '',
+    impact: {
+      user_count: payload.user_count || 0,
+      session_count: payload.session_count || 0,
+      session_ids: payload.session_ids || [],
+      source_type: payload.source_type || '',
+    },
+    errors: {
+      console_errors: payload.console_errors || [],
+      network_errors: payload.network_errors || [],
+    },
+    fullstory: {
+      session_context: payload.session_context || null,
+      session_summary: payload.session_summary || null,
+    },
+    received_at: payload.received_at || new Date().toISOString(),
+  };
 }
