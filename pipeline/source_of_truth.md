@@ -101,3 +101,31 @@ Rather than silently giving up, the PM agent may file an **exception request**.
 - Session data flows from FullStory to BigQuery for weekly analysis
 - The "Game Started" custom event fires when a player clicks their first cell
 - The "Game Completed" custom event fires when a player wins or loses a game
+
+## Roadmap & Design Notes
+
+### Dashboard Modularity (Priority)
+
+The dashboard tiles (ConstellationScatter, TopIssues, EngagementDonut,
+UnderstandingSankey, LearningVelocityGauge, SessionTimeline, etc.) should be
+refactored into a modular, composable widget system so they can be:
+
+- **Reused across multiple sites/experiences** — not just the Minesweeper game
+- **Configured per-site** — each site picks which tiles appear, their layout,
+  and which data sources they connect to
+- **Extended easily** — new metric tiles can be added without touching existing ones
+- **Driven by a dashboard config** — a JSON/YAML manifest that declares which
+  widgets to render, their data bindings, and layout grid positions
+
+This is important because the behavioral intelligence layer (fingerprint encoder,
+FullStory behavioral profiles, BigQuery pipeline) is site-agnostic. The dashboard
+should be too — enabling a single warehouse of behavioral data across multiple
+web experiences with per-site custom dashboards.
+
+### Multi-Site Behavioral Intelligence
+
+The fingerprint encoder is already site-agnostic (raw DOM events → 32-D vector).
+Scaling to multiple sites with standardized data in a shared warehouse will
+increase the diversity of behavioral patterns, improving archetype classification
+and intent prediction. Design decisions should favor shared schemas and
+site-tagged data over site-specific pipelines.
