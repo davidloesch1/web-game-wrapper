@@ -136,7 +136,7 @@ export default function Dashboard() {
     (e) => e.week === expData.currentWeek,
   )
 
-  const activeSiteSummary = selectedSite && dashData?.sites_summary?.[selectedSite]
+  const activeSiteSummary = selectedSite ? dashData?.sites_summary?.[selectedSite] : undefined
   const activeBehavioral = activeSiteSummary?.behavioral_summary || dashData?.behavioral_summary
   const activeQualReport = activeSiteSummary?.qualitative_report || dashData?.qualitative_report
 
