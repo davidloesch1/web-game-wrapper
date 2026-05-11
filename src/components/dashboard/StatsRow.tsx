@@ -18,17 +18,25 @@ function Stat({ label, value, subtitle, color = 'text-white' }: StatProps) {
 interface Props {
   totalSessions: number
   totalSummarized: number
-  understoodPct: number
-  masteredQuicklyPct: number
   generatedAt: string
+  mode: 'aggregate' | 'site'
+  meanValueScore?: number | null
+  willReturnPct?: number | null
+  understoodPct?: number
+  masteredQuicklyPct?: number
+  siteCount?: number
 }
 
 export default function StatsRow({
   totalSessions,
   totalSummarized,
+  generatedAt,
+  mode,
+  meanValueScore,
+  willReturnPct,
   understoodPct,
   masteredQuicklyPct,
-  generatedAt,
+  siteCount,
 }: Props) {
   const date = new Date(generatedAt)
   const formattedDate = date.toLocaleDateString('en-US', {
@@ -38,6 +46,36 @@ export default function StatsRow({
     minute: '2-digit',
   })
 
+  if (mode === 'aggregate') {
+    return (
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat label="Total Sessions" value={totalSessions} color="text-cyan-400" />
+        <Stat
+          label="AI Summarized"
+          value={totalSummarized}
+          subtitle={`across ${siteCount ?? '—'} sites`}
+          color="text-purple-400"
+        />
+        <Stat
+          label="Mean Value Score"
+          value={meanValueScore != null ? meanValueScore.toFixed(2) : '—'}
+          color={
+            meanValueScore != null && meanValueScore >= 0.5 ? 'text-green-400' : 'text-yellow-400'
+          }
+        />
+        <Stat
+          label="Will Return"
+          value={willReturnPct != null ? `${willReturnPct}%` : '—'}
+          subtitle={`as of ${formattedDate}`}
+          color={
+            willReturnPct != null && willReturnPct > 50 ? 'text-green-400' : 'text-yellow-400'
+          }
+        />
+      </div>
+    )
+  }
+
+  const hasLegacy = understoodPct != null && masteredQuicklyPct != null
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <Stat label="Total Sessions" value={totalSessions} color="text-cyan-400" />
@@ -47,17 +85,41 @@ export default function StatsRow({
         subtitle={`of ${totalSessions}`}
         color="text-purple-400"
       />
-      <Stat
-        label="Understood Mechanics"
-        value={`${understoodPct}%`}
-        color={understoodPct > 50 ? 'text-green-400' : 'text-yellow-400'}
-      />
-      <Stat
-        label="Mastered Quickly"
-        value={`${masteredQuicklyPct}%`}
-        subtitle={`as of ${formattedDate}`}
-        color={masteredQuicklyPct > 20 ? 'text-green-400' : 'text-yellow-400'}
-      />
+      {hasLegacy ? (
+        <>
+          <Stat
+            label="Understood Mechanics"
+            value={`${understoodPct}%`}
+            color={understoodPct! > 50 ? 'text-green-400' : 'text-yellow-400'}
+          />
+          <Stat
+            label="Mastered Quickly"
+            value={`${masteredQuicklyPct}%`}
+            subtitle={`as of ${formattedDate}`}
+            color={masteredQuicklyPct! > 20 ? 'text-green-400' : 'text-yellow-400'}
+          />
+        </>
+      ) : (
+        <>
+          <Stat
+            label="Mean Value Score"
+            value={meanValueScore != null ? meanValueScore.toFixed(2) : '—'}
+            color={
+              meanValueScore != null && meanValueScore >= 0.5
+                ? 'text-green-400'
+                : 'text-yellow-400'
+            }
+          />
+          <Stat
+            label="Will Return"
+            value={willReturnPct != null ? `${willReturnPct}%` : '—'}
+            subtitle={`as of ${formattedDate}`}
+            color={
+              willReturnPct != null && willReturnPct > 50 ? 'text-green-400' : 'text-yellow-400'
+            }
+          />
+        </>
+      )}
     </div>
   )
 }

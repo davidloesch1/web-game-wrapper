@@ -99,6 +99,7 @@ export interface Projection {
   fingerprint_count?: number
   experiment_variant?: string
   experiment_week?: number
+  site_id?: string
 }
 
 export interface DashboardSession {
@@ -116,6 +117,7 @@ export interface DashboardSession {
   user_agent_browser?: string
   user_agent_device?: string
   location_country?: string
+  site_id?: string
   fingerprint_events: FingerprintEvent[]
   summary?: SessionSummary | null
   projection?: Projection | null
@@ -166,12 +168,20 @@ export interface QualitativeReport {
   variant_breakdown: Record<string, VariantBreakdown>
 }
 
+export interface SiteSummary {
+  total_sessions: number
+  total_summarized: number
+  qualitative_report: QualitativeReport
+  behavioral_summary?: BehavioralSummary
+}
+
 export interface DashboardData {
   generated_at: string
   total_sessions: number
   total_summarized: number
   qualitative_report: QualitativeReport
   behavioral_summary?: BehavioralSummary
+  sites_summary?: Record<string, SiteSummary>
   experiments: Array<{
     week: number
     status: string

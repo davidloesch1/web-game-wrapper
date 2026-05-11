@@ -12,7 +12,7 @@ import {
 import type { DashboardSession, Projection } from '../../types/dashboard'
 
 type ViewMode = 'fingerprints' | 'sessions'
-type ColorMode = 'archetype' | 'intent' | 'dominant_state' | 'value'
+type ColorMode = 'archetype' | 'intent' | 'dominant_state' | 'value' | 'site'
 
 interface Props {
   sessions: DashboardSession[]
@@ -57,6 +57,17 @@ const STATE_COLORS: Record<string, string> = {
   unknown: '#374151',
 }
 
+const SITE_COLOR_PALETTE = [
+  '#06b6d4', '#a855f7', '#ec4899', '#22c55e', '#f97316',
+  '#3b82f6', '#eab308', '#ef4444', '#14b8a6', '#f43f5e',
+]
+
+function siteColorFromId(siteId: string, allSites: string[]): string {
+  const idx = allSites.indexOf(siteId)
+  if (idx >= 0) return SITE_COLOR_PALETTE[idx % SITE_COLOR_PALETTE.length]
+  return '#374151'
+}
+
 function valueToColor(score: number): string {
   if (score >= 0.7) return '#22c55e'
   if (score >= 0.4) return '#eab308'
@@ -76,6 +87,8 @@ export default function ConstellationScatter({
     sessions.filter((s) => s.summary).map((s) => [s.session_id, s.summary!]),
   )
 
+  const allSiteIds = [...new Set(sessions.map((s) => s.site_id || 'unknown'))].sort()
+
   const activeProjections = viewMode === 'sessions' ? sessionProjections : projections
 
   const scatterData = activeProjections.map((p) => {
@@ -85,6 +98,7 @@ export default function ConstellationScatter({
       x: p.x,
       y: p.y,
       sessionId: p.session_id,
+      siteId: session?.site_id || p.site_id || 'unknown',
       archetype: summary?.archetype?.primary || 'unknown',
       archetypeConfidence: summary?.archetype?.confidence,
       intent: summary?.intent?.primary || 'unknown',
@@ -105,6 +119,8 @@ export default function ConstellationScatter({
 
   function getDotColor(entry: (typeof scatterData)[0]): string {
     switch (colorMode) {
+      case 'site':
+        return siteColorFromId(entry.siteId, allSiteIds)
       case 'archetype':
         return ARCHETYPE_COLORS[entry.archetype] || ARCHETYPE_COLORS.unknown
       case 'intent':
@@ -120,6 +136,11 @@ export default function ConstellationScatter({
 
   function getActiveLegend(): Record<string, string> {
     switch (colorMode) {
+      case 'site': {
+        const legend: Record<string, string> = {}
+        allSiteIds.forEach((sid) => { legend[sid] = siteColorFromId(sid, allSiteIds) })
+        return legend
+      }
       case 'archetype':
         return ARCHETYPE_COLORS
       case 'intent':
@@ -133,6 +154,7 @@ export default function ConstellationScatter({
 
   const activeLegend = getActiveLegend()
   const presentKeys = new Set(scatterData.map((d) => {
+    if (colorMode === 'site') return d.siteId
     if (colorMode === 'value') return d.valueScore != null ? (d.valueScore >= 0.7 ? 'High (≥0.7)' : d.valueScore >= 0.4 ? 'Medium' : 'Low (<0.4)') : ''
     if (colorMode === 'archetype') return d.archetype
     if (colorMode === 'intent') return d.intent
@@ -156,6 +178,7 @@ export default function ConstellationScatter({
             style={{ backgroundColor: getDotColor(d) }}
           />
           <span className="font-semibold text-gray-200 capitalize">
+            {colorMode === 'site' && d.siteId}
             {colorMode === 'archetype' && d.archetype.replace('_', ' ')}
             {colorMode === 'intent' && d.intent.replace('_', ' ')}
             {colorMode === 'dominant_state' && d.dominantState}
@@ -222,6 +245,7 @@ export default function ConstellationScatter({
   }
 
   const colorLabels: Record<ColorMode, string> = {
+    site: 'Site',
     archetype: 'Archetype',
     intent: 'Intent',
     dominant_state: 'State',

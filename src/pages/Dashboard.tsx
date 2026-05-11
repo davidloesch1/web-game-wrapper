@@ -9,6 +9,7 @@ import EngagementDonut from '../components/dashboard/EngagementDonut'
 import UnderstandingSankey from '../components/dashboard/UnderstandingSankey'
 import TopIssues from '../components/dashboard/TopIssues'
 import SessionTimeline from '../components/dashboard/SessionTimeline'
+import SiteCards from '../components/dashboard/SiteCards'
 import ExperimentCard from '../components/ExperimentCard'
 import ExperimentTable from '../components/ExperimentTable'
 import MetricChart from '../components/MetricChart'
@@ -18,37 +19,76 @@ export default function Dashboard() {
   const { data: dashData, loading: dashLoading } = useDashboardData()
   const { data: expData, loading: expLoading } = useExperimentData()
 
+  const [selectedSite, setSelectedSite] = useState<string | null>(null)
   const [selectedWeek, setSelectedWeek] = useState<number | null>(null)
   const [selectedVariant, setSelectedVariant] = useState<'all' | 'a' | 'b'>('all')
-  const [selectedProgression, setSelectedProgression] = useState<string | null>(null)
+  const [selectedArchetype, setSelectedArchetype] = useState<string | null>(null)
+  const [selectedIntent, setSelectedIntent] = useState<string | null>(null)
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
 
   const hasDashboardData = dashData && dashData.total_sessions > 0
+  const isAggregate = selectedSite === null
+
+  const sites = useMemo(() => {
+    if (!dashData) return []
+    const siteSet = new Set<string>()
+    for (const s of dashData.sessions) {
+      if (s.site_id && s.site_id !== 'unknown') siteSet.add(s.site_id)
+    }
+    return [...siteSet].sort()
+  }, [dashData])
 
   const weeks = useMemo(() => {
     if (!dashData) return []
     const weekSet = new Set<number>()
     for (const s of dashData.sessions) {
-      if (s.experiment_week != null) weekSet.add(s.experiment_week)
+      if (s.experiment_week != null) {
+        if (!selectedSite || s.site_id === selectedSite) {
+          weekSet.add(s.experiment_week)
+        }
+      }
     }
     return [...weekSet].sort()
+  }, [dashData, selectedSite])
+
+  const archetypes = useMemo(() => {
+    if (!dashData) return []
+    const set = new Set<string>()
+    for (const s of dashData.sessions) {
+      const a = s.summary?.archetype?.primary
+      if (a) set.add(a)
+    }
+    return [...set].sort()
+  }, [dashData])
+
+  const intents = useMemo(() => {
+    if (!dashData) return []
+    const set = new Set<string>()
+    for (const s of dashData.sessions) {
+      const i = s.summary?.intent?.primary
+      if (i) set.add(i)
+    }
+    return [...set].sort()
   }, [dashData])
 
   const filteredSessions = useMemo(() => {
     if (!dashData) return []
     return dashData.sessions.filter((s: DashboardSession) => {
+      if (selectedSite != null && s.site_id !== selectedSite) return false
       if (selectedWeek != null && s.experiment_week !== selectedWeek) return false
       if (selectedVariant !== 'all') {
         const v = (s.experiment_variant || '').toLowerCase()
         if (v !== selectedVariant) return false
       }
-      if (selectedProgression != null && s.summary) {
-        if (s.summary.learning_progression !== selectedProgression) return false
+      if (selectedArchetype != null) {
+        if (s.summary?.archetype?.primary !== selectedArchetype) return false
       }
-      if (selectedProgression != null && !s.summary) return false
+      if (selectedIntent != null) {
+        if (s.summary?.intent?.primary !== selectedIntent) return false
+      }
       return true
     })
-  }, [dashData, selectedWeek, selectedVariant, selectedProgression])
+  }, [dashData, selectedSite, selectedWeek, selectedVariant, selectedArchetype, selectedIntent])
 
   const filteredProjections = useMemo(() => {
     if (!dashData) return []
@@ -67,7 +107,12 @@ export default function Dashboard() {
     return dashData.sessions.find((s) => s.session_id === selectedSessionId) || null
   }, [selectedSessionId, dashData])
 
-  // Loading state
+  function handleSiteChange(site: string | null) {
+    setSelectedSite(site)
+    setSelectedWeek(null)
+    setSelectedVariant('all')
+  }
+
   if (dashLoading || expLoading) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
@@ -76,7 +121,6 @@ export default function Dashboard() {
     )
   }
 
-  // Session detail view (Level 2 + 3)
   if (selectedSession) {
     return (
       <div className="mx-auto max-w-6xl px-4 py-12">
@@ -92,19 +136,31 @@ export default function Dashboard() {
     (e) => e.week === expData.currentWeek,
   )
 
+  const activeSiteSummary = selectedSite && dashData?.sites_summary?.[selectedSite]
+  const activeBehavioral = activeSiteSummary?.behavioral_summary || dashData?.behavioral_summary
+  const activeQualReport = activeSiteSummary?.qualitative_report || dashData?.qualitative_report
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-12">
       <div className="mb-8">
         <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
-          Experiment Dashboard
+          {isAggregate ? 'Cross-Site Dashboard' : (
+            <span className="capitalize">{selectedSite} Dashboard</span>
+          )}
         </h1>
         <p className="mt-2 text-gray-400">
           {hasDashboardData ? (
             <>
               Analyzing{' '}
-              <span className="text-cyan-400">{dashData.total_sessions}</span>{' '}
-              sessions with{' '}
-              <span className="text-purple-400">{dashData.total_summarized}</span>{' '}
+              <span className="text-cyan-400">{filteredSessions.length}</span>{' '}
+              sessions
+              {isAggregate && sites.length > 0 && (
+                <> across <span className="text-purple-400">{sites.length}</span> sites</>
+              )}
+              {' '}with{' '}
+              <span className="text-purple-400">
+                {filteredSessions.filter((s) => s.summary).length}
+              </span>{' '}
               AI-generated summaries
             </>
           ) : expData ? (
@@ -119,39 +175,50 @@ export default function Dashboard() {
         </p>
       </div>
 
-      {/* Current experiment */}
-      {currentExperiment && expData && (
+      {!isAggregate && currentExperiment && expData && (
         <div className="mb-8">
           <ExperimentCard experiment={currentExperiment} goal={expData.goal} />
         </div>
       )}
 
-      {/* Dashboard data section */}
       {hasDashboardData ? (
         <div className="space-y-6">
-          {/* Filters */}
           <DashboardFilters
+            sites={sites}
+            selectedSite={selectedSite}
+            onSiteChange={handleSiteChange}
             weeks={weeks}
             selectedWeek={selectedWeek}
             onWeekChange={setSelectedWeek}
             selectedVariant={selectedVariant}
             onVariantChange={setSelectedVariant}
-            selectedProgression={selectedProgression}
-            onProgressionChange={setSelectedProgression}
+            archetypes={archetypes}
+            selectedArchetype={selectedArchetype}
+            onArchetypeChange={setSelectedArchetype}
+            intents={intents}
+            selectedIntent={selectedIntent}
+            onIntentChange={setSelectedIntent}
           />
 
-          {/* Stats */}
           <StatsRow
             totalSessions={filteredSessions.length}
             totalSummarized={filteredSessions.filter((s) => s.summary).length}
-            understoodPct={dashData.qualitative_report.understood_mechanics_pct || 0}
-            masteredQuicklyPct={
-              dashData.qualitative_report.learning_velocity?.mastered_quickly_pct || 0
-            }
             generatedAt={dashData.generated_at}
+            mode={isAggregate ? 'aggregate' : 'site'}
+            siteCount={sites.length}
+            meanValueScore={activeBehavioral?.value_prediction?.mean_score}
+            willReturnPct={activeBehavioral?.value_prediction?.will_return_pct}
+            understoodPct={activeQualReport?.understood_mechanics_pct}
+            masteredQuicklyPct={activeQualReport?.learning_velocity?.mastered_quickly_pct}
           />
 
-          {/* Constellation + Learning Velocity */}
+          {isAggregate && dashData.sites_summary && (
+            <SiteCards
+              sitesSummary={dashData.sites_summary}
+              onSelectSite={(site) => handleSiteChange(site)}
+            />
+          )}
+
           <div className="grid gap-6 lg:grid-cols-3">
             <div className="lg:col-span-2">
               <ConstellationScatter
@@ -162,32 +229,42 @@ export default function Dashboard() {
               />
             </div>
             <div>
-              {dashData.qualitative_report.learning_velocity ? (
+              {!isAggregate && activeQualReport?.learning_velocity ? (
                 <LearningVelocityGauge
-                  velocity={dashData.qualitative_report.learning_velocity}
+                  velocity={activeQualReport.learning_velocity}
                 />
               ) : (
                 <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6 h-full flex items-center justify-center">
-                  <p className="text-xs text-gray-600">Learning velocity data not yet available</p>
+                  <p className="text-xs text-gray-600">
+                    {isAggregate
+                      ? 'Select a site for learning velocity'
+                      : 'Learning velocity data not yet available'}
+                  </p>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Engagement + Understanding Flow + Issues */}
-          <div className="grid gap-6 lg:grid-cols-3">
-            <EngagementDonut
-              distribution={dashData.qualitative_report.engagement_distribution || {}}
-            />
-            <UnderstandingSankey sessions={filteredSessions} />
-            <TopIssues
-              functionalIssues={dashData.qualitative_report.top_functional_issues || []}
-              designGaps={dashData.qualitative_report.top_design_gaps || []}
-              frustrationSignals={dashData.qualitative_report.top_frustration_signals || []}
-            />
-          </div>
+          {!isAggregate ? (
+            <div className="grid gap-6 lg:grid-cols-3">
+              <EngagementDonut
+                distribution={activeQualReport?.engagement_distribution || {}}
+              />
+              <UnderstandingSankey sessions={filteredSessions} />
+              <TopIssues
+                functionalIssues={activeQualReport?.top_functional_issues || []}
+                designGaps={activeQualReport?.top_design_gaps || []}
+                frustrationSignals={activeQualReport?.top_frustration_signals || []}
+              />
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/30 p-8 text-center">
+              <p className="text-sm text-gray-500">
+                Select a site above to view engagement, understanding flow, and site-specific issues
+              </p>
+            </div>
+          )}
 
-          {/* Session list */}
           <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
             <h3 className="text-sm font-semibold text-gray-400 mb-4">
               Sessions ({filteredSessions.length})
@@ -196,6 +273,7 @@ export default function Dashboard() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-left text-gray-500 border-b border-gray-800">
+                    {isAggregate && <th className="pb-2 pr-4 font-medium">Site</th>}
                     <th className="pb-2 pr-4 font-medium">Session</th>
                     <th className="pb-2 pr-4 font-medium">Active Time</th>
                     <th className="pb-2 pr-4 font-medium">Clicks</th>
@@ -213,6 +291,11 @@ export default function Dashboard() {
                       onClick={() => setSelectedSessionId(s.session_id)}
                       className="cursor-pointer hover:bg-gray-800/30 transition-colors"
                     >
+                      {isAggregate && (
+                        <td className="py-2 pr-4 text-gray-400 capitalize">
+                          {s.site_id || '—'}
+                        </td>
+                      )}
                       <td className="py-2 pr-4 font-mono text-cyan-500 truncate max-w-[120px]">
                         {s.session_id.slice(0, 12)}...
                       </td>
@@ -297,8 +380,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Experiment charts (always shown) */}
-      {expData && (
+      {!isAggregate && expData && (
         <>
           <div className="mt-10 mb-6">
             <h2 className="text-xl font-bold">Experiment Metrics</h2>
@@ -310,6 +392,20 @@ export default function Dashboard() {
             <ExperimentTable experiments={expData.experiments} />
           </div>
         </>
+      )}
+
+      {isAggregate && expData && expData.experiments.length > 0 && (
+        <div className="mt-10">
+          <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
+            <h3 className="text-sm font-semibold text-gray-400 mb-2">
+              Experiments Overview
+            </h3>
+            <p className="text-xs text-gray-500">
+              {expData.experiments.length} experiment{expData.experiments.length !== 1 ? 's' : ''} tracked.
+              Select a site to view experiment details, metrics, and history.
+            </p>
+          </div>
+        </div>
       )}
     </div>
   )
