@@ -1,6 +1,6 @@
 {
   "goal": "Maximize average session value",
-  "currentWeek": 2,
+  "currentWeek": 3,
   "experiments": [
     {
       "week": 1,
@@ -22,7 +22,7 @@
     },
     {
       "week": 2,
-      "status": "running",
+      "status": "complete",
       "hypothesis": "Reducing the default game difficulty from a 16x16 grid with 40 mines to a 12x12 grid with 20 mines will increase average session value by at least 5% because easier games are likely to lead to a higher rate of games completed, which in turn could increase active play time per session and reduce frustration, especially for new players.",
       "variantA": "The control group experiences the current default Minesweeper game settings: a 16x16 grid with 40 mines.",
       "variantB": "The treatment group experiences a modified default Minesweeper game difficulty: a 12x12 grid with 20 mines.",
@@ -34,8 +34,26 @@
         "a": null,
         "b": null
       },
-      "winner": null,
+      "winner": "a",
       "changelog": "Reducing the default game difficulty from a 16x16 grid with 40 mines to a 12x12 grid with 20 mines will increase average session value by at least 5% because easier games are likely to lead to a higher rate of games completed, which in turn could increase active play time per session and reduce frustration, especially for new players.",
+      "versionUrl": "https://web-game-n1z9c0dz1-david-loeschs-projects.vercel.app"
+    },
+    {
+      "week": 3,
+      "status": "running",
+      "hypothesis": "Slightly reducing the number of mines for the default 16x16 grid from 40 to 30 will increase average session value by at least 5% because a marginally easier game is likely to lead to a higher rate of game completions, which in turn could increase active play time per session and reduce frustration.",
+      "variantA": "",
+      "variantB": "",
+      "variantAUrl": "https://web-game-nine-lake.vercel.app/",
+      "variantBUrl": "https://web-game-oiciuj5os-david-loeschs-projects.vercel.app",
+      "startDate": "2026-05-11",
+      "endDate": "2026-05-17",
+      "metrics": {
+        "a": null,
+        "b": null
+      },
+      "winner": null,
+      "changelog": "Slightly reducing the number of mines for the default 16x16 grid from 40 to 30 will increase average session value by at least 5% because a marginally easier game is likely to lead to a higher rate of game completions, which in turn could increase active play time per session and reduce frustration.",
       "versionUrl": null
     }
   ]
