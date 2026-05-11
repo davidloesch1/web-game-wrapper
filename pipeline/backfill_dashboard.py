@@ -535,7 +535,7 @@ def _tag_sessions_with_site_id(
             stats["page_prop"] += 1
             continue
 
-        url_host = session.get("url_host", "")
+        url_host = session.get("url_host") or ""
         if url_host in exact_map:
             session["site_id"] = exact_map[url_host]
             stats["exact"] += 1
