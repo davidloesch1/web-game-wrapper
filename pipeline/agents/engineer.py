@@ -9,6 +9,7 @@ This keeps every variant-B branch alive as a permanent, playable archive
 via its Vercel preview URL.
 """
 
+import difflib
 import json
 import logging
 import os
@@ -17,7 +18,12 @@ import subprocess
 import time
 import urllib.request
 
+from .llm import call_gemini, load_prompt
+
 logger = logging.getLogger(__name__)
+
+ALLOWED_FILES = {"game.js", "style.css", "index.html"}
+MAX_LINES_CHANGED = 50
 
 GAME_REPO_URL = os.environ.get(
     "GAME_REPO_URL",
@@ -76,12 +82,115 @@ def merge_winner(winner: str, week: int, next_week: int, work_dir: str = "/tmp/g
     )
 
 
+def _generate_code_changes(proposal: dict, work_dir: str) -> dict[str, str]:
+    """Use Gemini to generate modified file contents based on the PM's notes.
+
+    Reads the current contents of each file the PM specified, sends them
+    to Gemini along with the implementation notes, and returns a dict
+    mapping filename to new file contents.
+    """
+    files_to_change = proposal.get("files_changed", [])
+    if not files_to_change:
+        logger.warning("No files_changed in proposal — skipping code generation")
+        return {}
+
+    disallowed = [f for f in files_to_change if f not in ALLOWED_FILES]
+    if disallowed:
+        raise ValueError(f"Proposal targets disallowed files: {disallowed}")
+
+    current_contents = {}
+    for filename in files_to_change:
+        filepath = os.path.join(work_dir, filename)
+        if os.path.exists(filepath):
+            with open(filepath) as f:
+                current_contents[filename] = f.read()
+        else:
+            logger.warning("File %s not found in repo — will be created", filename)
+            current_contents[filename] = ""
+
+    system_prompt = load_prompt("engineer")
+    user_payload = json.dumps({
+        "implementation_notes": proposal.get("implementation_notes", ""),
+        "hypothesis": proposal.get("hypothesis", ""),
+        "variant_b_description": proposal.get("variant_b_description", ""),
+        "current_files": current_contents,
+    }, indent=2)
+
+    logger.info("Calling Gemini to generate code changes for: %s", files_to_change)
+    result = call_gemini(system_prompt, user_payload)
+
+    if not isinstance(result, dict):
+        raise ValueError(f"Gemini returned unexpected type: {type(result).__name__}")
+
+    unknown_files = [f for f in result if f not in ALLOWED_FILES]
+    if unknown_files:
+        raise ValueError(f"Gemini produced changes to disallowed files: {unknown_files}")
+
+    return result
+
+
+def _validate_changes(
+    original_contents: dict[str, str],
+    new_contents: dict[str, str],
+) -> int:
+    """Validate the generated changes against scope limits.
+
+    Returns the total number of lines changed. Raises ValueError if
+    validation fails.
+    """
+    total_changed = 0
+
+    for filename, new_text in new_contents.items():
+        old_text = original_contents.get(filename, "")
+        old_lines = old_text.splitlines(keepends=True)
+        new_lines = new_text.splitlines(keepends=True)
+
+        diff = list(difflib.unified_diff(
+            old_lines, new_lines, fromfile=filename, tofile=filename,
+        ))
+        changed = sum(
+            1 for line in diff
+            if line.startswith("+") or line.startswith("-")
+        )
+        changed = max(0, changed - 2)  # subtract --- and +++ headers
+
+        logger.info("  %s: %d lines changed", filename, changed)
+        total_changed += changed
+
+    if total_changed > MAX_LINES_CHANGED:
+        raise ValueError(
+            f"Total lines changed ({total_changed}) exceeds limit "
+            f"({MAX_LINES_CHANGED}). Aborting to stay within constraints."
+        )
+
+    if total_changed == 0:
+        logger.warning("Gemini returned identical file contents — no changes applied")
+
+    return total_changed
+
+
+def _apply_changes(work_dir: str, new_contents: dict[str, str]):
+    """Write the generated file contents to the working tree."""
+    for filename, contents in new_contents.items():
+        filepath = os.path.join(work_dir, filename)
+        with open(filepath, "w") as f:
+            f.write(contents)
+        logger.info("  Wrote %s (%d bytes)", filename, len(contents))
+
+
 def run(proposal: dict, week: int, work_dir: str = "/tmp/game-experiment") -> dict:
     """Implement an experiment by creating the variant-B challenger branch.
 
     Main is always variant A (control).  This function creates a single
     branch from main with the experimental changes applied, plus the
     experiment.json marker identifying it as variant B.
+
+    Flow:
+    1. Clone repo, create branch
+    2. Call Gemini with PM implementation notes + current file contents
+    3. Validate the generated changes (file count, line count)
+    4. Apply changes, write experiment marker, commit, push
+    5. Discover the Vercel preview URL
 
     Args:
         proposal: Approved experiment proposal.
@@ -99,15 +208,43 @@ def run(proposal: dict, week: int, work_dir: str = "/tmp/game-experiment") -> di
     logger.info("Cloning game repo to %s", work_dir)
     _run_git(["clone", GAME_REPO_URL, work_dir])
 
-    # Create variant B — the challenger branch
     logger.info("Creating treatment branch: %s", branch_b)
     _run_git(["checkout", "-b", branch_b], cwd=work_dir)
+
+    files_to_change = proposal.get("files_changed", [])
+    original_contents = {}
+    for filename in files_to_change:
+        filepath = os.path.join(work_dir, filename)
+        if os.path.exists(filepath):
+            with open(filepath) as f:
+                original_contents[filename] = f.read()
+
+    if files_to_change:
+        new_contents = _generate_code_changes(proposal, work_dir)
+        if new_contents:
+            lines_changed = _validate_changes(original_contents, new_contents)
+            _apply_changes(work_dir, new_contents)
+            logger.info(
+                "Applied %d lines of changes across %d file(s)",
+                lines_changed, len(new_contents),
+            )
+        else:
+            logger.warning(
+                "No code changes generated — branch will only have experiment marker"
+            )
+    else:
+        logger.warning(
+            "No files_changed in proposal — branch will only have experiment marker"
+        )
+
     _write_experiment_marker(work_dir, proposal, week, "b")
     _run_git(["add", "."], cwd=work_dir)
-    _run_git(["commit", "-m", f"Week {week} experiment: variant B (treatment)"], cwd=work_dir)
+    _run_git(
+        ["commit", "-m", f"Week {week} experiment: variant B (treatment)"],
+        cwd=work_dir,
+    )
     _run_git(["push", "-u", "origin", branch_b], cwd=work_dir)
 
-    # Discover Vercel preview URL for variant B
     sha_b = _run_git(["rev-parse", "HEAD"], cwd=work_dir).strip()
     variant_b_url = _discover_deployment_url(sha_b, branch_b)
 
