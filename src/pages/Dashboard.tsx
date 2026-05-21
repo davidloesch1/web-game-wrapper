@@ -8,6 +8,7 @@ import LearningVelocityGauge from '../components/dashboard/LearningVelocityGauge
 import EngagementDonut from '../components/dashboard/EngagementDonut'
 import UnderstandingSankey from '../components/dashboard/UnderstandingSankey'
 import TopIssues from '../components/dashboard/TopIssues'
+import SessionArcs from '../components/dashboard/SessionArcs'
 import SessionTimeline from '../components/dashboard/SessionTimeline'
 import ExperimentCard from '../components/ExperimentCard'
 import ExperimentTable from '../components/ExperimentTable'
@@ -197,6 +198,11 @@ export default function Dashboard() {
               )}
             </div>
           </div>
+
+          <SessionArcs
+            sessions={filteredSessions}
+            onSelectSession={setSelectedSessionId}
+          />
 
           <div className="grid gap-6 lg:grid-cols-3">
             <EngagementDonut

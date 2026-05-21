@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   ScatterChart,
   Scatter,
@@ -8,6 +8,8 @@ import {
   Tooltip,
   ResponsiveContainer,
   Cell,
+  ReferenceArea,
+  Label,
 } from 'recharts'
 import type { DashboardSession, Projection } from '../../types/dashboard'
 
@@ -71,6 +73,7 @@ export default function ConstellationScatter({
 }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>('sessions')
   const [colorMode, setColorMode] = useState<ColorMode>('archetype')
+  const [showZones, setShowZones] = useState(true)
 
   const summaryMap = new Map(
     sessions.filter((s) => s.summary).map((s) => [s.session_id, s.summary!]),
@@ -102,6 +105,71 @@ export default function ConstellationScatter({
       eventTime: p.event_time || null,
     }
   })
+
+  const zones = useMemo(() => {
+    const scored = scatterData.filter((d) => d.valueScore != null)
+    if (scored.length < 5) return []
+
+    const tiers = {
+      high: scored.filter((d) => d.valueScore! >= 0.7),
+      mid: scored.filter((d) => d.valueScore! >= 0.4 && d.valueScore! < 0.7),
+      low: scored.filter((d) => d.valueScore! < 0.4),
+    }
+
+    const pad = 0.12
+
+    function bounds(points: typeof scored) {
+      if (points.length < 2) return null
+      const xs = points.map((p) => p.x)
+      const ys = points.map((p) => p.y)
+      return {
+        x1: Math.min(...xs) - pad,
+        x2: Math.max(...xs) + pad,
+        y1: Math.min(...ys) - pad,
+        y2: Math.max(...ys) + pad,
+      }
+    }
+
+    const result: Array<{
+      label: string
+      color: string
+      fill: string
+      avgValue: number
+      count: number
+      x1: number
+      x2: number
+      y1: number
+      y2: number
+    }> = []
+
+    const highBounds = bounds(tiers.high)
+    if (highBounds) {
+      const avg = tiers.high.reduce((s, d) => s + d.valueScore!, 0) / tiers.high.length
+      result.push({
+        label: `High-Value Zone (avg ${avg.toFixed(2)})`,
+        color: '#22c55e',
+        fill: 'rgba(34, 197, 94, 0.06)',
+        avgValue: avg,
+        count: tiers.high.length,
+        ...highBounds,
+      })
+    }
+
+    const lowBounds = bounds(tiers.low)
+    if (lowBounds) {
+      const avg = tiers.low.reduce((s, d) => s + d.valueScore!, 0) / tiers.low.length
+      result.push({
+        label: `At-Risk Zone (avg ${avg.toFixed(2)})`,
+        color: '#ef4444',
+        fill: 'rgba(239, 68, 68, 0.06)',
+        avgValue: avg,
+        count: tiers.low.length,
+        ...lowBounds,
+      })
+    }
+
+    return result
+  }, [scatterData])
 
   function getDotColor(entry: (typeof scatterData)[0]): string {
     switch (colorMode) {
@@ -259,6 +327,18 @@ export default function ConstellationScatter({
               <option key={k} value={k}>Color: {v}</option>
             ))}
           </select>
+          {zones.length > 0 && (
+            <button
+              onClick={() => setShowZones((v) => !v)}
+              className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
+                showZones
+                  ? 'border-cyan-600 bg-cyan-900/30 text-cyan-400'
+                  : 'border-gray-700 bg-gray-800 text-gray-500'
+              }`}
+            >
+              Zones
+            </button>
+          )}
         </div>
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 mb-3 text-[10px]">
@@ -293,6 +373,27 @@ export default function ConstellationScatter({
             tickLine={false}
             name="PC2"
           />
+          {showZones && zones.map((zone) => (
+            <ReferenceArea
+              key={zone.label}
+              x1={zone.x1}
+              x2={zone.x2}
+              y1={zone.y1}
+              y2={zone.y2}
+              fill={zone.fill}
+              stroke={zone.color}
+              strokeOpacity={0.3}
+              strokeDasharray="4 4"
+            >
+              <Label
+                value={zone.label}
+                position="insideTopLeft"
+                fill={zone.color}
+                fontSize={10}
+                opacity={0.7}
+              />
+            </ReferenceArea>
+          ))}
           <Tooltip content={<CustomTooltip />} />
           <Scatter
             data={scatterData}
