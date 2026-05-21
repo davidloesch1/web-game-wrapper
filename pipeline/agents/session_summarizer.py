@@ -260,48 +260,107 @@ def run(session_data: list[dict]) -> list[dict]:
     return summaries
 
 
-UNDERSTANDING_LEVELS = ["none", "partial", "solid", "advanced"]
+ENGAGED_STATES = {"engaged", "deliberate", "learning"}
+STRUGGLING_STATES = {"confused", "frustrated"}
+STATE_RANK = {
+    "confused": 0,
+    "frustrated": 0,
+    "idle": 1,
+    "exploring": 2,
+    "rushing": 2,
+    "learning": 3,
+    "deliberate": 4,
+    "engaged": 4,
+}
 
 
-def _understanding_index(level: str) -> int:
-    """Map an understanding level to an ordinal for computing shifts."""
-    try:
-        return UNDERSTANDING_LEVELS.index(level.lower())
-    except (ValueError, AttributeError):
-        return -1
+def _classify_session_arc(annotations: list[dict]) -> tuple[str, int | None]:
+    """Classify a session's learning arc from its fingerprint state sequence.
+
+    Returns (progression_label, onset_index) where onset_index is the
+    first fingerprint where the player reaches an engaged state, or None.
+    """
+    if not annotations:
+        return "unknown", None
+
+    states = [a.get("primary_state", "unknown") for a in annotations]
+    first_state = states[0]
+    last_state = states[-1]
+
+    onset_index = None
+    for i, st in enumerate(states):
+        if st in ENGAGED_STATES:
+            onset_index = i
+            break
+
+    first_rank = STATE_RANK.get(first_state, 1)
+    last_rank = STATE_RANK.get(last_state, 1)
+
+    if len(states) == 1:
+        if first_state in ENGAGED_STATES:
+            return "mastered_quickly", 0
+        return "no_change", None
+
+    if onset_index == 0 and last_state in ENGAGED_STATES:
+        return "mastered_quickly", 0
+    elif onset_index is not None and last_state in ENGAGED_STATES:
+        return "progressed", onset_index
+    elif last_rank > first_rank:
+        return "progressed", onset_index
+    elif last_rank < first_rank:
+        return "regressed", onset_index
+    else:
+        return "no_change", onset_index
 
 
 def _learning_velocity_stats(summaries: list[dict]) -> dict:
-    """Compute learning velocity metrics from onset times and progressions."""
-    onset_times = []
+    """Compute learning velocity from behavioral fingerprint state arcs.
+
+    Uses fingerprint_annotations (per-fingerprint behavioral states) to
+    derive how quickly players reach an engaged state and whether their
+    understanding improves, stays flat, or regresses within a session.
+
+    Falls back to legacy fields (learning_onset_seconds, etc.) when
+    annotations aren't available.
+    """
+    onset_indices: list[int] = []
     progression_counts: dict[str, int] = {}
-    understanding_shifts: list[int] = []
+    shift_values: list[int] = []
 
     for s in summaries:
-        onset = s.get("learning_onset_seconds")
-        if isinstance(onset, (int, float)) and onset >= 0:
-            onset_times.append(onset)
+        annotations = s.get("fingerprint_annotations", [])
 
-        prog = s.get("learning_progression", "unknown")
-        progression_counts[prog] = progression_counts.get(prog, 0) + 1
+        if annotations:
+            progression, onset_idx = _classify_session_arc(annotations)
+            progression_counts[progression] = progression_counts.get(progression, 0) + 1
+            if onset_idx is not None:
+                onset_indices.append(onset_idx)
 
-        initial = _understanding_index(s.get("initial_understanding", ""))
-        final = _understanding_index(s.get("final_understanding", ""))
-        if initial >= 0 and final >= 0:
-            understanding_shifts.append(final - initial)
+            states = [a.get("primary_state", "unknown") for a in annotations]
+            first_rank = STATE_RANK.get(states[0], 1)
+            last_rank = STATE_RANK.get(states[-1], 1)
+            shift_values.append(last_rank - first_rank)
+        else:
+            # Legacy fallback
+            onset = s.get("learning_onset_seconds")
+            if isinstance(onset, (int, float)) and onset >= 0:
+                onset_indices.append(int(onset))
 
-    total = len(summaries)
-    sorted_onsets = sorted(onset_times)
+            prog = s.get("learning_progression", "unknown")
+            progression_counts[prog] = progression_counts.get(prog, 0) + 1
 
-    improved = sum(1 for shift in understanding_shifts if shift > 0)
-    flat = sum(1 for shift in understanding_shifts if shift == 0)
-    regressed = sum(1 for shift in understanding_shifts if shift < 0)
-    shift_total = len(understanding_shifts)
+    total = sum(progression_counts.values())
+    sorted_onsets = sorted(onset_indices)
+
+    improved = sum(1 for v in shift_values if v > 0)
+    flat = sum(1 for v in shift_values if v == 0)
+    regressed = sum(1 for v in shift_values if v < 0)
+    shift_total = len(shift_values)
 
     return {
         "learning_onset_seconds": {
-            "count": len(onset_times),
-            "mean": round(sum(onset_times) / len(onset_times), 1) if onset_times else None,
+            "count": len(onset_indices),
+            "mean": round(sum(onset_indices) / len(onset_indices), 1) if onset_indices else None,
             "median": sorted_onsets[len(sorted_onsets) // 2] if sorted_onsets else None,
             "p25": sorted_onsets[len(sorted_onsets) // 4] if len(sorted_onsets) >= 4 else None,
             "p75": sorted_onsets[3 * len(sorted_onsets) // 4] if len(sorted_onsets) >= 4 else None,
@@ -314,7 +373,7 @@ def _learning_velocity_stats(summaries: list[dict]) -> dict:
             "improved_pct": round(improved / shift_total * 100, 1) if shift_total else 0,
             "flat_pct": round(flat / shift_total * 100, 1) if shift_total else 0,
             "regressed_pct": round(regressed / shift_total * 100, 1) if shift_total else 0,
-            "avg_shift": round(sum(understanding_shifts) / shift_total, 2) if shift_total else 0,
+            "avg_shift": round(sum(shift_values) / shift_total, 2) if shift_total else 0,
         },
     }
 

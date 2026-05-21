@@ -19,21 +19,25 @@
     },
     "learning_velocity": {
       "learning_onset_seconds": {
-        "count": 0,
-        "mean": null,
-        "median": null,
-        "p25": null,
-        "p75": null
+        "count": 7,
+        "mean": 0.9,
+        "median": 1,
+        "p25": 1,
+        "p75": 1
       },
       "learning_progression_distribution": {
-        "unknown": 50
+        "unknown": 21,
+        "no_change": 17,
+        "regressed": 6,
+        "progressed": 5,
+        "mastered_quickly": 1
       },
-      "mastered_quickly_pct": 0.0,
+      "mastered_quickly_pct": 2.0,
       "understanding_shift": {
-        "improved_pct": 0,
-        "flat_pct": 0,
-        "regressed_pct": 0,
-        "avg_shift": 0
+        "improved_pct": 17.2,
+        "flat_pct": 62.1,
+        "regressed_pct": 20.7,
+        "avg_shift": -0.07
       }
     },
     "top_functional_issues": [],

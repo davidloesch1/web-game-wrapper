@@ -21,15 +21,22 @@ const PROGRESSION_LABELS: Record<string, string> = {
 
 export default function LearningVelocityGauge({ velocity, previousVelocity }: Props) {
   const onset = velocity.learning_onset_seconds
-  const medianSeconds = onset.median
+  const medianOnset = onset.median
   const prevMedian = previousVelocity?.learning_onset_seconds.median
   const trend =
-    medianSeconds != null && prevMedian != null
-      ? prevMedian - medianSeconds
+    medianOnset != null && prevMedian != null
+      ? prevMedian - medianOnset
       : null
 
-  const progressionDist = velocity.learning_progression_distribution
-  const total = Object.values(progressionDist).reduce((a, b) => a + b, 0)
+  const rawDist = velocity.learning_progression_distribution
+  const knownDist = Object.fromEntries(
+    Object.entries(rawDist).filter(([k]) => k !== 'unknown')
+  )
+  const knownTotal = Object.values(knownDist).reduce((a, b) => a + b, 0)
+
+  const engagedPct = onset.count && knownTotal
+    ? Math.round((onset.count / knownTotal) * 100)
+    : null
 
   const shift = velocity.understanding_shift
 
@@ -37,32 +44,44 @@ export default function LearningVelocityGauge({ velocity, previousVelocity }: Pr
     <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
       <h3 className="text-sm font-semibold text-gray-400 mb-4">Learning Velocity</h3>
 
-      {/* Big number: median onset */}
       <div className="text-center mb-6">
-        <div className="text-5xl font-black text-white tracking-tight">
-          {medianSeconds != null ? `${medianSeconds}s` : '—'}
-        </div>
-        <div className="text-sm text-gray-500 mt-1">
-          median time to &ldquo;get it&rdquo;
-        </div>
+        {engagedPct != null ? (
+          <>
+            <div className="text-5xl font-black text-white tracking-tight">
+              {engagedPct}%
+            </div>
+            <div className="text-sm text-gray-500 mt-1">
+              of sessions reached engagement
+            </div>
+            {medianOnset != null && (
+              <div className="text-xs text-gray-500 mt-1">
+                median onset: step {medianOnset}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="text-5xl font-black text-white tracking-tight">—</div>
+            <div className="text-sm text-gray-500 mt-1">not enough data</div>
+          </>
+        )}
         {trend != null && (
           <div
             className={`text-sm font-medium mt-1 ${trend > 0 ? 'text-green-400' : trend < 0 ? 'text-red-400' : 'text-gray-500'}`}
           >
-            {trend > 0 ? `↓ ${trend}s faster` : trend < 0 ? `↑ ${Math.abs(trend)}s slower` : '→ no change'}
+            {trend > 0 ? `↓ ${trend} steps faster` : trend < 0 ? `↑ ${Math.abs(trend)} steps slower` : '→ no change'}
             {' vs last week'}
           </div>
         )}
       </div>
 
-      {/* Progression bar */}
-      {total > 0 && (
+      {knownTotal > 0 && (
         <div className="mb-4">
-          <div className="text-xs text-gray-500 mb-1.5">Learning Progression</div>
+          <div className="text-xs text-gray-500 mb-1.5">Behavioral Progression</div>
           <div className="flex h-4 rounded-full overflow-hidden">
             {Object.entries(PROGRESSION_COLORS).map(([key, color]) => {
-              const count = progressionDist[key] || 0
-              const pct = (count / total) * 100
+              const count = knownDist[key] || 0
+              const pct = (count / knownTotal) * 100
               if (pct === 0) return null
               return (
                 <div
@@ -79,7 +98,7 @@ export default function LearningVelocityGauge({ velocity, previousVelocity }: Pr
           </div>
           <div className="flex justify-between mt-1 text-[10px] text-gray-600">
             {Object.entries(PROGRESSION_LABELS).map(([key, label]) => {
-              const count = progressionDist[key] || 0
+              const count = knownDist[key] || 0
               if (count === 0) return null
               return (
                 <div key={key} className="flex items-center gap-1">
@@ -87,7 +106,7 @@ export default function LearningVelocityGauge({ velocity, previousVelocity }: Pr
                     className="inline-block h-1.5 w-1.5 rounded-full"
                     style={{ backgroundColor: PROGRESSION_COLORS[key] }}
                   />
-                  {label} {Math.round((count / total) * 100)}%
+                  {label} {Math.round((count / knownTotal) * 100)}%
                 </div>
               )
             })}
@@ -95,7 +114,6 @@ export default function LearningVelocityGauge({ velocity, previousVelocity }: Pr
         </div>
       )}
 
-      {/* Understanding shift */}
       <div className="grid grid-cols-3 gap-3 text-center">
         <div className="rounded-lg bg-gray-800/50 p-3">
           <div className="text-lg font-bold text-green-400">{shift.improved_pct}%</div>
