@@ -128,7 +128,15 @@ def generate_summary(session_id: str, api_key: str, session: dict | None = None)
     if isinstance(result, dict) and "response" in result:
         return result["response"]
     if isinstance(result, dict) and "summary" in result:
-        return {"session_narrative": result["summary"]}
+        raw = result["summary"]
+        if isinstance(raw, str):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    return parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
+        return {"session_narrative": raw}
 
     return result if isinstance(result, dict) else None
 
