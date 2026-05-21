@@ -43,7 +43,9 @@ interface SessionArc {
   startState: BehavioralState
 }
 
-function outcomeLabel(arc: SessionArc): string {
+type Outcome = 'improved' | 'flat' | 'regressed'
+
+function outcomeLabel(arc: SessionArc): Outcome {
   const startRank = STATE_RANK[arc.startState] ?? 1
   const endRank = STATE_RANK[arc.endState] ?? 1
   if (endRank > startRank) return 'improved'
