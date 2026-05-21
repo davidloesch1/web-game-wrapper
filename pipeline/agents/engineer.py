@@ -1,12 +1,12 @@
 """Engineering agent — implements approved experiments via git branches.
 
-Strategy: main is always the control.  Each experiment the engineer
-creates a single challenger branch.  When a winner is decided:
-  - Challenger wins → merge into main, tag the pre-merge state, bump version
-  - Control wins → main stays, just bump the version marker
+Strategy: main is always Variant A (the control).  Each week the engineer
+creates a single challenger branch (variant B).  When a winner is decided:
+  - B wins → merge B into main, tag the pre-merge state, bump experiment.json
+  - A wins → main stays, just bump experiment.json for the next week
 
-This keeps every challenger branch alive as a permanent, playable archive
-via its deploy preview URL.
+This keeps every variant-B branch alive as a permanent, playable archive
+via its Vercel preview URL.
 """
 
 import json
@@ -24,31 +24,10 @@ GAME_REPO_URL = os.environ.get(
     "https://github.com/davidloesch1/web-game.git",
 )
 
-MAIN_PRODUCTION_URL = os.environ.get(
-    "MAIN_PRODUCTION_URL",
-    "https://web-game-nine-lake.vercel.app/",
-)
+MAIN_PRODUCTION_URL = "https://web-game-nine-lake.vercel.app/"
 
 
-def _get_repo_url(site_config: dict | None = None) -> str:
-    """Get the git repo URL, preferring site config over env."""
-    if site_config and site_config.get("repo"):
-        repo = site_config["repo"]
-        token = os.environ.get("GAME_REPO_PAT", "")
-        if token:
-            return f"https://x-access-token:{token}@github.com/{repo}.git"
-        return f"https://github.com/{repo}.git"
-    return GAME_REPO_URL
-
-
-def _get_production_url(site_config: dict | None = None) -> str:
-    if site_config and site_config.get("production_url"):
-        url = site_config["production_url"]
-        return url if url.startswith("https://") else f"https://{url}/"
-    return MAIN_PRODUCTION_URL
-
-
-def merge_winner(winner: str, week: int, next_week: int, work_dir: str = "/tmp/game-merge", site_config: dict | None = None) -> None:
+def merge_winner(winner: str, week: int, next_week: int, work_dir: str = "/tmp/game-merge") -> None:
     """Close the current experiment and prepare main for the next week.
 
     If B won, merge the experiment branch into main.
@@ -57,16 +36,14 @@ def merge_winner(winner: str, week: int, next_week: int, work_dir: str = "/tmp/g
 
     The losing/old branch is kept permanently for historical reference.
     """
-    repo_url = _get_repo_url(site_config)
-    site_id = (site_config or {}).get("site_id", "site")
-
     if os.path.exists(work_dir):
         shutil.rmtree(work_dir)
 
-    _run_git(["clone", repo_url, work_dir])
+    _run_git(["clone", GAME_REPO_URL, work_dir])
     _run_git(["checkout", "main"], cwd=work_dir)
 
-    tag_name = f"{site_id}-week-{week}-control"
+    # Tag the current main so we have a playable snapshot of this week's control
+    tag_name = f"week-{week}-control"
     try:
         _run_git(["tag", tag_name], cwd=work_dir)
         _run_git(["push", "origin", tag_name], cwd=work_dir)
@@ -79,87 +56,80 @@ def merge_winner(winner: str, week: int, next_week: int, work_dir: str = "/tmp/g
         logger.info("Merging winner %s into main", winning_branch)
         _run_git(
             ["merge", f"origin/{winning_branch}", "--no-ff",
-             "-m", f"{site_id} week {week}: advance winning challenger to main"],
+             "-m", f"Week {week}: advance winning variant B to main"],
             cwd=work_dir,
         )
 
-    _update_main_experiment_marker(work_dir, next_week, site_config)
+    # Update experiment.json on main for the next week (variant A / control)
+    _update_main_experiment_marker(work_dir, next_week)
     _run_git(["add", "experiment.json"], cwd=work_dir)
     _run_git(
         ["commit", "--allow-empty", "-m",
-         f"{site_id}: set experiment.json for control (week {next_week})"],
+         f"Week {next_week}: set experiment.json for variant A (control)"],
         cwd=work_dir,
     )
     _run_git(["push", "origin", "main"], cwd=work_dir)
 
     logger.info(
-        "Main updated — %s week %d winner: %s",
-        site_id, week, winner.upper(),
+        "Main updated — week %d winner: %s, experiment.json set for week %d",
+        week, winner.upper(), next_week,
     )
 
 
-def run(proposal: dict, week: int, work_dir: str = "/tmp/game-experiment", site_config: dict | None = None) -> dict:
-    """Implement an experiment by creating a challenger branch.
+def run(proposal: dict, week: int, work_dir: str = "/tmp/game-experiment") -> dict:
+    """Implement an experiment by creating the variant-B challenger branch.
 
-    Main is always the control. This function creates a single branch
-    from main with the experimental changes applied, plus the
-    experiment.json marker identifying it as the challenger.
+    Main is always variant A (control).  This function creates a single
+    branch from main with the experimental changes applied, plus the
+    experiment.json marker identifying it as variant B.
 
     Args:
         proposal: Approved experiment proposal.
-        week: Current week/cycle number.
-        work_dir: Temporary directory to clone the repo into.
-        site_config: Parsed site config dict.
+        week: Current week number.
+        work_dir: Temporary directory to clone the game repo into.
 
     Returns:
-        Dict with branch name and deploy URLs.
+        Dict with branch name and Vercel preview URLs.
     """
-    repo_url = _get_repo_url(site_config)
-    production_url = _get_production_url(site_config)
-    site_id = (site_config or {}).get("site_id", "site")
-    repo_slug = (site_config or {}).get("repo", "davidloesch1/web-game")
     branch_b = f"experiment/week-{week}-variant-b"
 
     if os.path.exists(work_dir):
         shutil.rmtree(work_dir)
 
-    logger.info("Cloning %s to %s", repo_slug, work_dir)
-    _run_git(["clone", repo_url, work_dir])
+    logger.info("Cloning game repo to %s", work_dir)
+    _run_git(["clone", GAME_REPO_URL, work_dir])
 
-    logger.info("Creating challenger branch: %s", branch_b)
+    # Create variant B — the challenger branch
+    logger.info("Creating treatment branch: %s", branch_b)
     _run_git(["checkout", "-b", branch_b], cwd=work_dir)
-    _write_experiment_marker(work_dir, proposal, week, "challenger", site_config)
+    _write_experiment_marker(work_dir, proposal, week, "b")
     _run_git(["add", "."], cwd=work_dir)
-    _run_git(["commit", "-m", f"{site_id} experiment: challenger (week {week})"], cwd=work_dir)
+    _run_git(["commit", "-m", f"Week {week} experiment: variant B (treatment)"], cwd=work_dir)
     _run_git(["push", "-u", "origin", branch_b], cwd=work_dir)
 
+    # Discover Vercel preview URL for variant B
     sha_b = _run_git(["rev-parse", "HEAD"], cwd=work_dir).strip()
-    variant_b_url = _discover_deployment_url(sha_b, branch_b, repo=repo_slug)
+    variant_b_url = _discover_deployment_url(sha_b, branch_b)
 
-    logger.info("Control URL (main): %s", production_url)
-    logger.info("Challenger URL: %s", variant_b_url)
+    logger.info("Variant A URL (main): %s", MAIN_PRODUCTION_URL)
+    logger.info("Variant B URL: %s", variant_b_url)
 
     return {
         "branch_b": branch_b,
-        "variant_a_url": production_url,
+        "variant_a_url": MAIN_PRODUCTION_URL,
         "variant_b_url": variant_b_url,
     }
 
 
-def _update_main_experiment_marker(work_dir: str, week: int, site_config: dict | None = None):
-    """Write experiment.json on main identifying it as the control."""
-    site_id = (site_config or {}).get("site_id", "site")
-    version = (site_config or {}).get("site_version", "1.0.0")
+def _update_main_experiment_marker(work_dir: str, week: int):
+    """Write experiment.json on main identifying it as the control for a given week."""
     marker_path = os.path.join(work_dir, "experiment.json")
     with open(marker_path, "w") as f:
         json.dump({
-            "site_id": site_id,
-            "experiment_id": f"{site_id}-v{version}",
-            "experiment_variant": "control",
-            "site_version": version,
             "week": week,
+            "variant": "a",
             "hypothesis": "",
-            "description": "Control — current production site",
+            "description": "Control — current production game",
             "implementation_notes": "",
         }, f, indent=2)
         f.write("\n")
@@ -172,13 +142,7 @@ def _discover_deployment_url(
     max_wait: int = 60,
     poll_interval: int = 10,
 ) -> str:
-    """Poll GitHub's deployments API to find the Vercel preview URL for a commit.
-
-    Vercel creates a GitHub deployment when it deploys a branch. We poll
-    until the deployment appears and has a success status with a target_url.
-
-    Falls back to a constructed URL if the API doesn't return one in time.
-    """
+    """Poll GitHub's deployments API to find the Vercel preview URL for a commit."""
     token = os.environ.get("GAME_REPO_PAT") or os.environ.get("GITHUB_TOKEN", "")
     headers = {
         "Accept": "application/vnd.github+json",
@@ -187,7 +151,6 @@ def _discover_deployment_url(
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    # Extract token from GAME_REPO_URL if not set separately
     if not token:
         repo_url = os.environ.get("GAME_REPO_URL", "")
         if "x-access-token:" in repo_url:
@@ -221,26 +184,22 @@ def _discover_deployment_url(
             time.sleep(poll_interval)
             waited += poll_interval
 
-    # Fallback: construct a URL (may not work but is better than nothing)
     fallback = f"https://web-game-git-{branch.replace('/', '-')}-davidloesch1.vercel.app"
     logger.warning("Could not discover deployment URL for %s — using fallback: %s", branch, fallback)
     return fallback
 
 
-def _write_experiment_marker(work_dir: str, proposal: dict, week: int, variant: str, site_config: dict | None = None):
-    """Write an experiment config marker file to the site repo."""
-    site_id = (site_config or {}).get("site_id", "site")
-    version = (site_config or {}).get("site_version", "1.0.0")
+def _write_experiment_marker(work_dir: str, proposal: dict, week: int, variant: str):
+    """Write an experiment config marker file to the game repo."""
     marker_path = os.path.join(work_dir, "experiment.json")
     with open(marker_path, "w") as f:
         json.dump({
-            "site_id": site_id,
-            "experiment_id": f"{site_id}-v{version}",
-            "experiment_variant": variant,
-            "site_version": version,
             "week": week,
+            "variant": variant,
             "hypothesis": proposal.get("hypothesis", ""),
-            "description": proposal.get("challenger_description", "") or proposal.get("variant_b_description", ""),
+            "description": proposal.get(
+                f"variant_{'a' if variant == 'a' else 'b'}_description", ""
+            ),
             "implementation_notes": proposal.get("implementation_notes", ""),
         }, f, indent=2)
 

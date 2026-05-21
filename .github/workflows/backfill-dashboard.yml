@@ -2,12 +2,6 @@ name: Backfill Dashboard Data
 
 on:
   workflow_dispatch:
-    inputs:
-      site_id:
-        description: 'Site to backfill (matches filename in pipeline/sites/). Leave empty for all sites.'
-        required: false
-        default: ''
-        type: string
 
 permissions:
   contents: write
@@ -35,7 +29,6 @@ jobs:
 
       - name: Run dashboard backfill
         env:
-          SITE_ID: ${{ inputs.site_id || '' }}
           BIGQUERY_CREDENTIALS: ${{ secrets.BIG_QUERY_CREDENTIALS }}
           FULLSTORY_API_KEY: ${{ secrets.FULLSTORY_API_KEY }}
         run: python backfill_dashboard.py

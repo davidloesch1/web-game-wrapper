@@ -15,14 +15,10 @@ import logging
 import math
 import os
 import sys
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).parent))
-
-from site_config import load_all_site_configs, list_sites
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -158,45 +154,6 @@ def pull_all_sessions() -> list[dict]:
         if sid:
             fingerprints_by_session.setdefault(sid, []).append(fp)
 
-    # Also pull site_id from page properties (set by FS.setProperties)
-    site_id_queries = [
-        f"""
-        SELECT DISTINCT
-          pv.session_id,
-          pp.site_id_str AS site_id
-        FROM {_bq_table('page_views')} pv
-        INNER JOIN {_bq_table('page_properties')} pp
-          ON pv.event_id = pp.event_id
-        WHERE pv.event_time >= TIMESTAMP('2026-05-01')
-          AND pp.site_id_str IS NOT NULL
-        """,
-        f"""
-        SELECT DISTINCT
-          pv.session_id,
-          pp.site_id AS site_id
-        FROM {_bq_table('page_views')} pv
-        INNER JOIN {_bq_table('page_properties')} pp
-          ON pv.event_id = pp.event_id
-        WHERE pv.event_time >= TIMESTAMP('2026-05-01')
-          AND pp.site_id IS NOT NULL
-        """,
-    ]
-
-    site_id_by_session: dict[str, str] = {}
-    for sq in site_id_queries:
-        try:
-            for row in client.query(sq):
-                r = dict(row)
-                sid = r.get("session_id")
-                site = r.get("site_id")
-                if sid and site:
-                    site_id_by_session[sid] = site
-            if site_id_by_session:
-                logger.info("Found site_id page property for %d sessions", len(site_id_by_session))
-                break
-        except Exception as e:
-            logger.debug("site_id query attempt failed (trying next): %s", e)
-
     variants_by_session: dict[str, dict] = {}
     for vq in variant_queries:
         try:
@@ -224,6 +181,7 @@ def pull_all_sessions() -> list[dict]:
             for url_key, variant in [("variantAUrl", "a"), ("variantBUrl", "b")]:
                 url = exp.get(url_key, "")
                 if url:
+                    from urllib.parse import urlparse
                     host = urlparse(url).netloc
                     if host:
                         url_variant_map[host] = (variant, week)
@@ -241,8 +199,6 @@ def pull_all_sessions() -> list[dict]:
         session["total_rage_clicks"] = click_data.get("total_rage_clicks", 0)
         session["total_dead_clicks"] = click_data.get("total_dead_clicks", 0)
         session["fingerprint_events"] = fingerprints_by_session.get(sid, [])
-
-        session["_page_prop_site_id"] = site_id_by_session.get(sid)
 
         variant_data = variants_by_session.get(sid, {})
         session["experiment_week"] = variant_data.get("experiment_week")
@@ -377,7 +333,6 @@ def project_fingerprints_2d(sessions: list[dict]) -> dict:
             "fingerprint_index": fp_indices[idx],
             "experiment_variant": session.get("experiment_variant"),
             "experiment_week": session.get("experiment_week"),
-            "site_id": session.get("site_id"),
         })
 
     # --- Session-level projections (centroid of each session's fingerprints) ---
@@ -404,7 +359,6 @@ def project_fingerprints_2d(sessions: list[dict]) -> dict:
             "fingerprint_count": len(vecs),
             "experiment_variant": session.get("experiment_variant"),
             "experiment_week": session.get("experiment_week"),
-            "site_id": session.get("site_id"),
         })
 
     logger.info(
@@ -502,128 +456,14 @@ def _aggregate_behavioral_profiles(summaries: list[dict]) -> dict:
     }
 
 
-def _build_host_to_site_map() -> tuple[dict[str, str], list[tuple[str, str]]]:
-    """Build exact and fuzzy mappings from url_host to site_id."""
-    exact: dict[str, str] = {}
-    fuzzy: list[tuple[str, str]] = []
-    for site_id, cfg in load_all_site_configs().items():
-        prod_url = cfg.get("production_url", "")
-        if prod_url:
-            host = urlparse(prod_url if "://" in prod_url else f"https://{prod_url}").netloc
-            if host:
-                exact[host] = site_id
-                repo = cfg.get("repo", "")
-                repo_name = repo.split("/")[-1] if repo else ""
-                if repo_name:
-                    fuzzy.append((repo_name, site_id))
-    logger.info("Host-to-site exact mapping: %s", exact)
-    logger.info("Host-to-site fuzzy patterns: %s", fuzzy)
-    return exact, fuzzy
-
-
-def _tag_sessions_with_site_id(
-    sessions: list[dict],
-    exact_map: dict[str, str],
-    fuzzy_patterns: list[tuple[str, str]],
-) -> None:
-    """Tag each session with site_id. Priority: page property > exact host > fuzzy host."""
-    stats = {"page_prop": 0, "exact": 0, "fuzzy": 0, "unknown": 0}
-    for session in sessions:
-        pp_site = session.get("_page_prop_site_id")
-        if pp_site:
-            session["site_id"] = pp_site
-            stats["page_prop"] += 1
-            continue
-
-        url_host = session.get("url_host") or ""
-        if url_host in exact_map:
-            session["site_id"] = exact_map[url_host]
-            stats["exact"] += 1
-            continue
-
-        matched = False
-        for pattern, site_id in fuzzy_patterns:
-            if pattern in url_host:
-                session["site_id"] = site_id
-                stats["fuzzy"] += 1
-                matched = True
-                break
-        if not matched:
-            session["site_id"] = "unknown"
-            stats["unknown"] += 1
-
-    logger.info(
-        "Site tagging results: %d page-prop, %d exact-host, %d fuzzy-host, %d unknown",
-        stats["page_prop"], stats["exact"], stats["fuzzy"], stats["unknown"],
-    )
-
-
-def _compute_per_site_summaries(
-    sessions: list[dict],
-    session_summaries: list[dict],
-    aggregate_fn,
-) -> dict[str, dict]:
-    """Compute qualitative_report and behavioral_summary per site_id."""
-    sessions_by_site: dict[str, list[dict]] = defaultdict(list)
-    for s in sessions:
-        sessions_by_site[s.get("site_id", "unknown")].append(s)
-
-    summaries_by_site: dict[str, list[dict]] = defaultdict(list)
-    session_site_map = {s.get("session_id"): s.get("site_id", "unknown") for s in sessions}
-    for summary in session_summaries:
-        sid = summary.get("session_id")
-        site = session_site_map.get(sid, "unknown")
-        summaries_by_site[site].append(summary)
-
-    result: dict[str, dict] = {}
-    for site_id, site_sessions in sessions_by_site.items():
-        site_sums = summaries_by_site.get(site_id, [])
-        try:
-            qual_report = aggregate_fn(site_sums)
-        except Exception:
-            qual_report = {"total_summarized": 0}
-        behavioral = _aggregate_behavioral_profiles(site_sums)
-        result[site_id] = {
-            "total_sessions": len(site_sessions),
-            "total_summarized": qual_report.get("total_summarized", 0),
-            "qualitative_report": qual_report,
-            "behavioral_summary": behavioral,
-        }
-
-    return result
-
-
 def main():
     logger.info("=== Dashboard Data Backfill ===")
-
-    # Build host-to-site mapping for tagging
-    exact_map, fuzzy_patterns = _build_host_to_site_map()
 
     # Pull all sessions from BigQuery
     sessions = pull_all_sessions()
     if not sessions:
         logger.error("No sessions found — cannot generate dashboard data")
         sys.exit(1)
-
-    # Tag sessions with site_id (page property > exact host > fuzzy host)
-    _tag_sessions_with_site_id(sessions, exact_map, fuzzy_patterns)
-
-    # Validate: warn about known sites with zero sessions
-    known_sites = set(list_sites())
-    observed_sites = {s.get("site_id") for s in sessions} - {"unknown"}
-    for missing_site in known_sites - observed_sites:
-        logger.warning(
-            "Site '%s' has zero sessions in BigQuery — verify FullStory instrumentation "
-            "and that the production_url in pipeline/sites/%s.md matches the deployed host.",
-            missing_site, missing_site,
-        )
-    unknown_count = sum(1 for s in sessions if s.get("site_id") == "unknown")
-    if unknown_count:
-        logger.warning(
-            "%d sessions have url_host not matching any site config (tagged as 'unknown'). "
-            "Consider adding site configs for new hosts or broadening the time range.",
-            unknown_count,
-        )
 
     # Generate AI summaries via FullStory
     from agents.session_summarizer import (
@@ -654,12 +494,6 @@ def main():
 
     # Compute behavioral intelligence aggregates
     behavioral_summary = _aggregate_behavioral_profiles(session_summaries)
-
-    # Compute per-site summaries
-    logger.info("--- Computing per-site summaries ---")
-    sites_summary = _compute_per_site_summaries(sessions, session_summaries, aggregate_summaries)
-    for site_id, ss in sites_summary.items():
-        logger.info("  Site '%s': %d sessions, %d summarized", site_id, ss["total_sessions"], ss["total_summarized"])
 
     # Compute 2D projections for fingerprint scatter
     logger.info("--- Computing 2D fingerprint projections ---")
@@ -695,7 +529,6 @@ def main():
         "total_summarized": qualitative_report.get("total_summarized", 0),
         "qualitative_report": qualitative_report,
         "behavioral_summary": behavioral_summary,
-        "sites_summary": sites_summary,
         "experiments": experiments.get("experiments", []),
         "goal": experiments.get("goal", ""),
         "current_week": experiments.get("currentWeek", 1),

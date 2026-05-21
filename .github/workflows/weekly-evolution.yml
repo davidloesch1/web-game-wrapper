@@ -4,12 +4,6 @@ on:
   schedule:
     - cron: '0 6 * * 1'  # Every Monday at 6am UTC
   workflow_dispatch:
-    inputs:
-      site_id:
-        description: 'Site to evolve (matches filename in pipeline/sites/)'
-        required: false
-        default: 'minesweeper'
-        type: string
 
 permissions:
   contents: write
@@ -42,7 +36,6 @@ jobs:
 
       - name: Run evolution pipeline
         env:
-          SITE_ID: ${{ inputs.site_id || 'minesweeper' }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           BIGQUERY_CREDENTIALS: ${{ secrets.BIG_QUERY_CREDENTIALS }}
           FULLSTORY_API_KEY: ${{ secrets.FULLSTORY_API_KEY }}

@@ -9,11 +9,6 @@ on:
         description: 'JSON error payload (for manual testing)'
         required: true
         type: string
-      site_id:
-        description: 'Site to heal (matches filename in pipeline/sites/)'
-        required: false
-        default: 'minesweeper'
-        type: string
 
 permissions:
   contents: write
@@ -46,7 +41,6 @@ jobs:
 
       - name: Run self-healing pipeline
         env:
-          SITE_ID: ${{ inputs.site_id || 'minesweeper' }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GAME_REPO_URL: https://x-access-token:${{ secrets.GAME_REPO_PAT }}@github.com/davidloesch1/web-game.git
           GAME_REPO_PAT: ${{ secrets.GAME_REPO_PAT }}
