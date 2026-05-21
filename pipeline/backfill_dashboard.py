@@ -244,6 +244,83 @@ def _parse_fingerprint_vec(props: dict | str) -> list[float] | None:
     return vec if len(vec) == 32 else None
 
 
+def _compute_state_centroids(
+    sessions: list[dict],
+    summary_by_session: dict[str, dict],
+) -> dict:
+    """Compute mean fingerprint vectors per behavioral state.
+
+    Pairs raw 32-dim fingerprint vectors with AI-generated state labels
+    from fingerprint_annotations. Each annotation covers a time window;
+    vectors are assigned to the nearest annotation by index proportion.
+
+    Returns a dict with centroids, per-state counts, and metadata for
+    client-side classification.
+    """
+    from datetime import datetime as _dt
+
+    state_vectors: dict[str, list[list[float]]] = {}
+
+    for session in sessions:
+        sid = session.get("session_id")
+        summary = summary_by_session.get(sid, {}) if sid else {}
+        annotations = summary.get("fingerprint_annotations", [])
+        if not annotations:
+            continue
+
+        fps = [
+            e for e in session.get("fingerprint_events", [])
+            if e.get("event_name") == "Fingerprint Generated"
+        ]
+        if not fps:
+            continue
+
+        vectors = []
+        for fp in fps:
+            vec = _parse_fingerprint_vec(fp.get("event_properties", {}))
+            if vec is not None:
+                vectors.append(vec)
+
+        if not vectors:
+            continue
+
+        n_vecs = len(vectors)
+        n_anns = len(annotations)
+
+        for vec_idx, vec in enumerate(vectors):
+            ann_idx = min(int(vec_idx / n_vecs * n_anns), n_anns - 1)
+            state = annotations[ann_idx].get("primary_state", "unknown")
+            if state == "unknown":
+                continue
+            state_vectors.setdefault(state, []).append(vec)
+
+    centroids: dict[str, list[float]] = {}
+    counts: dict[str, int] = {}
+
+    for state, vecs in state_vectors.items():
+        n = len(vecs)
+        counts[state] = n
+        centroid = [0.0] * 32
+        for v in vecs:
+            for d in range(32):
+                centroid[d] += v[d]
+        centroids[state] = [round(c / n, 6) for c in centroid]
+
+    total = sum(counts.values())
+    logger.info(
+        "Centroid states: %s (total vectors: %d)",
+        {s: counts[s] for s in sorted(counts)},
+        total,
+    )
+
+    return {
+        "generated_at": _dt.now().isoformat(),
+        "total_vectors": total,
+        "counts": counts,
+        "centroids": centroids,
+    }
+
+
 def project_fingerprints_2d(sessions: list[dict]) -> dict:
     """Project 32-D fingerprint vectors to 2D for scatter visualization.
 
@@ -515,6 +592,22 @@ def main():
         entry["summary"] = summary_by_session.get(sid)
         entry["projection"] = projection_by_session.get(sid)
         sessions_for_dashboard.append(entry)
+
+    # Compute behavioral state centroids from fingerprint vectors + AI labels
+    logger.info("--- Computing behavioral state centroids ---")
+    state_centroids = _compute_state_centroids(sessions, summary_by_session)
+
+    centroids_path = REPO_ROOT / "public" / "data" / "state_centroids.json"
+    centroids_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(centroids_path, "w") as f:
+        json.dump(state_centroids, f, indent=2)
+        f.write("\n")
+    logger.info(
+        "State centroids written to %s (%d states, %d total vectors)",
+        centroids_path,
+        len(state_centroids.get("centroids", {})),
+        state_centroids.get("total_vectors", 0),
+    )
 
     # Load experiment data
     experiments = {}

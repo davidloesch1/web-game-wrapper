@@ -2,6 +2,11 @@ name: Backfill Dashboard Data
 
 on:
   workflow_dispatch:
+    inputs:
+      max_summaries:
+        description: 'Max sessions to summarize (default 50, set higher for bulk training data)'
+        required: false
+        default: '50'
 
 permissions:
   contents: write
@@ -31,6 +36,7 @@ jobs:
         env:
           BIGQUERY_CREDENTIALS: ${{ secrets.BIG_QUERY_CREDENTIALS }}
           FULLSTORY_API_KEY: ${{ secrets.FULLSTORY_API_KEY }}
+          MAX_SESSION_SUMMARIES: ${{ inputs.max_summaries }}
         run: python backfill_dashboard.py
 
       - name: Commit and push dashboard data
@@ -38,10 +44,30 @@ jobs:
           cd ..
           git config --global user.name "Dashboard Backfill"
           git config --global user.email "pipeline@self-evolving-game.dev"
-          git add public/data/dashboard.json
+          git add public/data/dashboard.json public/data/state_centroids.json
           if git diff --cached --quiet; then
             echo "No changes to dashboard data"
           else
             git commit -m "Update dashboard data (backfill)"
+            git push
+          fi
+
+      - name: Push centroids to game repo
+        if: hashFiles('public/data/state_centroids.json') != ''
+        env:
+          GAME_REPO_PAT: ${{ secrets.GAME_REPO_PAT }}
+        run: |
+          cd ..
+          GAME_DIR=$(mktemp -d)
+          git clone "https://x-access-token:${GAME_REPO_PAT}@github.com/davidloesch1/web-game.git" "$GAME_DIR"
+          cp public/data/state_centroids.json "$GAME_DIR/state_centroids.json"
+          cd "$GAME_DIR"
+          git config user.name "Dashboard Backfill"
+          git config user.email "pipeline@self-evolving-game.dev"
+          git add state_centroids.json
+          if git diff --cached --quiet; then
+            echo "Centroids unchanged in game repo"
+          else
+            git commit -m "Update behavioral state centroids"
             git push
           fi
