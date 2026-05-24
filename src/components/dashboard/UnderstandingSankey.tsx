@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import type { DashboardSession } from '../../types/dashboard'
 
 interface Props {
@@ -5,6 +6,8 @@ interface Props {
 }
 
 const LEVELS = ['none', 'partial', 'solid', 'advanced'] as const
+type Level = (typeof LEVELS)[number]
+
 const LEVEL_COLORS: Record<string, string> = {
   none: '#ef4444',
   partial: '#eab308',
@@ -18,35 +21,59 @@ const LEVEL_LABELS: Record<string, string> = {
   advanced: 'Advanced',
 }
 
+const STATE_TO_UNDERSTANDING: Record<string, Level> = {
+  engaged: 'advanced',
+  deliberate: 'solid',
+  learning: 'partial',
+  exploring: 'partial',
+  rushing: 'partial',
+  idle: 'none',
+  frustrated: 'none',
+  confused: 'none',
+}
+
+function deriveUnderstanding(session: DashboardSession): { from: Level; to: Level } | null {
+  const annotations = session.summary?.fingerprint_annotations as
+    | Array<{ primary_state?: string }>
+    | undefined
+  if (!annotations || annotations.length < 2) return null
+
+  const firstState = annotations[0]?.primary_state
+  const lastState = annotations[annotations.length - 1]?.primary_state
+  if (!firstState || !lastState) return null
+
+  const from = STATE_TO_UNDERSTANDING[firstState] ?? 'none'
+  const to = STATE_TO_UNDERSTANDING[lastState] ?? 'none'
+  return { from, to }
+}
+
 export default function UnderstandingSankey({ sessions }: Props) {
-  const summarized = sessions.filter(
-    (s) => s.summary?.initial_understanding && s.summary?.final_understanding,
-  )
-  if (summarized.length === 0) {
+  const { flows, leftCounts, rightCounts, total } = useMemo(() => {
+    const f: Record<string, number> = {}
+    const lc: Record<string, number> = {}
+    const rc: Record<string, number> = {}
+    let count = 0
+
+    for (const s of sessions) {
+      const result = deriveUnderstanding(s)
+      if (!result) continue
+      const key = `${result.from}→${result.to}`
+      f[key] = (f[key] || 0) + 1
+      lc[result.from] = (lc[result.from] || 0) + 1
+      rc[result.to] = (rc[result.to] || 0) + 1
+      count++
+    }
+
+    return { flows: f, leftCounts: lc, rightCounts: rc, total: count }
+  }, [sessions])
+
+  if (total === 0) {
     return (
       <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
         <h3 className="text-sm font-semibold text-gray-400 mb-2">Understanding Flow</h3>
         <p className="text-xs text-gray-600">No session summaries available yet</p>
       </div>
     )
-  }
-
-  // Count flows: initial → final
-  const flows: Record<string, number> = {}
-  for (const s of summarized) {
-    const from = s.summary!.initial_understanding!
-    const to = s.summary!.final_understanding!
-    const key = `${from}→${to}`
-    flows[key] = (flows[key] || 0) + 1
-  }
-
-  const leftCounts: Record<string, number> = {}
-  const rightCounts: Record<string, number> = {}
-  for (const s of summarized) {
-    const from = s.summary!.initial_understanding!
-    const to = s.summary!.final_understanding!
-    leftCounts[from] = (leftCounts[from] || 0) + 1
-    rightCounts[to] = (rightCounts[to] || 0) + 1
   }
 
   const svgHeight = 200

@@ -7,7 +7,7 @@ import ConstellationScatter from '../components/dashboard/ConstellationScatter'
 import LearningVelocityGauge from '../components/dashboard/LearningVelocityGauge'
 import EngagementDonut from '../components/dashboard/EngagementDonut'
 import UnderstandingSankey from '../components/dashboard/UnderstandingSankey'
-import TopIssues from '../components/dashboard/TopIssues'
+import { FunctionalIssuesCard, DesignGapsCard, FrustrationSignalsCard } from '../components/dashboard/TopIssues'
 import SessionArcs from '../components/dashboard/SessionArcs'
 import SessionTimeline from '../components/dashboard/SessionTimeline'
 import ExperimentCard from '../components/ExperimentCard'
@@ -204,16 +204,24 @@ export default function Dashboard() {
             onSelectSession={setSelectedSessionId}
           />
 
-          <div className="grid gap-6 lg:grid-cols-3">
-            <EngagementDonut
-              distribution={dashData.qualitative_report?.engagement_distribution || {}}
-            />
+          <div className="grid gap-6 lg:grid-cols-2">
+            <EngagementDonut sessions={filteredSessions} />
             <UnderstandingSankey sessions={filteredSessions} />
-            <TopIssues
-              functionalIssues={dashData.qualitative_report?.top_functional_issues || []}
-              designGaps={dashData.qualitative_report?.top_design_gaps || []}
-              frustrationSignals={dashData.qualitative_report?.top_frustration_signals || []}
-            />
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold text-gray-400 mb-4">Top Issues Detected</h3>
+            <div className="grid gap-6 lg:grid-cols-3">
+              <FunctionalIssuesCard
+                items={dashData.qualitative_report?.top_functional_issues || []}
+              />
+              <DesignGapsCard
+                items={dashData.qualitative_report?.top_design_gaps || []}
+              />
+              <FrustrationSignalsCard
+                items={dashData.qualitative_report?.top_frustration_signals || []}
+              />
+            </div>
           </div>
 
           <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
