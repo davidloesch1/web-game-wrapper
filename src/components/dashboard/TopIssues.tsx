@@ -3,12 +3,6 @@ interface IssueItem {
   count: number
 }
 
-interface Props {
-  functionalIssues: IssueItem[]
-  designGaps: IssueItem[]
-  frustrationSignals: IssueItem[]
-}
-
 function IssueBar({ label, count, maxCount, color }: {
   label: string
   count: number
@@ -35,7 +29,7 @@ function IssueBar({ label, count, maxCount, color }: {
   )
 }
 
-function IssueSection({ title, items, color, emptyText }: {
+function IssueCard({ title, items, color, emptyText }: {
   title: string
   items: IssueItem[]
   color: string
@@ -44,10 +38,8 @@ function IssueSection({ title, items, color, emptyText }: {
   const maxCount = Math.max(...items.map((i) => i.count), 1)
 
   return (
-    <div>
-      <h4 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
-        {title}
-      </h4>
+    <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-5">
+      <h4 className="text-sm font-semibold text-gray-400 mb-3">{title}</h4>
       {items.length === 0 ? (
         <p className="text-xs text-gray-600">{emptyText}</p>
       ) : (
@@ -67,30 +59,35 @@ function IssueSection({ title, items, color, emptyText }: {
   )
 }
 
-export default function TopIssues({ functionalIssues, designGaps, frustrationSignals }: Props) {
+export function FunctionalIssuesCard({ items }: { items: IssueItem[] }) {
   return (
-    <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
-      <h3 className="text-sm font-semibold text-gray-400 mb-4">Top Issues Detected</h3>
-      <div className="space-y-5">
-        <IssueSection
-          title="Functional Issues"
-          items={functionalIssues}
-          color="#ef4444"
-          emptyText="No functional issues detected"
-        />
-        <IssueSection
-          title="Design Gaps"
-          items={designGaps}
-          color="#eab308"
-          emptyText="No design gaps detected"
-        />
-        <IssueSection
-          title="Frustration Signals"
-          items={frustrationSignals}
-          color="#f97316"
-          emptyText="No frustration signals detected"
-        />
-      </div>
-    </div>
+    <IssueCard
+      title="Functional Issues"
+      items={items}
+      color="#ef4444"
+      emptyText="No functional issues detected"
+    />
+  )
+}
+
+export function DesignGapsCard({ items }: { items: IssueItem[] }) {
+  return (
+    <IssueCard
+      title="Design Gaps"
+      items={items}
+      color="#eab308"
+      emptyText="No design gaps detected"
+    />
+  )
+}
+
+export function FrustrationSignalsCard({ items }: { items: IssueItem[] }) {
+  return (
+    <IssueCard
+      title="Frustration Signals"
+      items={items}
+      color="#f97316"
+      emptyText="No frustration signals detected"
+    />
   )
 }

@@ -1,7 +1,9 @@
+import { useMemo } from 'react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
+import type { DashboardSession } from '../../types/dashboard'
 
 interface Props {
-  distribution: Record<string, number>
+  sessions: DashboardSession[]
 }
 
 const ENGAGEMENT_COLORS: Record<string, string> = {
@@ -22,13 +24,54 @@ const ENGAGEMENT_LABELS: Record<string, string> = {
 
 const ENGAGEMENT_ORDER = ['flow_state', 'deep', 'moderate', 'shallow', 'bounce']
 
-export default function EngagementDonut({ distribution }: Props) {
+const STATE_TO_ENGAGEMENT: Record<string, string> = {
+  engaged: 'flow_state',
+  deliberate: 'deep',
+  learning: 'moderate',
+  exploring: 'moderate',
+  rushing: 'shallow',
+  idle: 'shallow',
+  frustrated: 'bounce',
+  confused: 'bounce',
+}
+
+function classifyEngagement(session: DashboardSession): string {
+  const summary = session.summary
+  if (!summary) return 'shallow'
+
+  const dominant = summary.dominant_state as string | undefined
+  if (dominant && STATE_TO_ENGAGEMENT[dominant]) {
+    const valuePred = summary.value_prediction as { score?: number } | undefined
+    if (
+      dominant === 'engaged' &&
+      valuePred?.score != null &&
+      valuePred.score < 0.6
+    ) {
+      return 'deep'
+    }
+    return STATE_TO_ENGAGEMENT[dominant]
+  }
+
+  return 'shallow'
+}
+
+export default function EngagementDonut({ sessions }: Props) {
+  const distribution = useMemo(() => {
+    const dist: Record<string, number> = {}
+    for (const s of sessions) {
+      if (!s.summary) continue
+      const level = classifyEngagement(s)
+      dist[level] = (dist[level] || 0) + 1
+    }
+    return dist
+  }, [sessions])
+
   const total = Object.values(distribution).reduce((a, b) => a + b, 0)
   if (total === 0) {
     return (
       <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
         <h3 className="text-sm font-semibold text-gray-400 mb-2">Engagement Quality</h3>
-        <p className="text-xs text-gray-600">No data available</p>
+        <p className="text-xs text-gray-600">No session data available</p>
       </div>
     )
   }
