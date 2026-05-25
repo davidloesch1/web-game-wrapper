@@ -40,7 +40,7 @@
     },
     {
       "week": 3,
-      "status": "running",
+      "status": "complete",
       "hypothesis": "Slightly reducing the number of mines for the default 16x16 grid from 40 to 30 will increase average session value by at least 5% because a marginally easier game is likely to lead to a higher rate of game completions, which in turn could increase active play time per session and reduce frustration.",
       "variantA": "",
       "variantB": "",
@@ -52,9 +52,9 @@
         "a": null,
         "b": null
       },
-      "winner": null,
+      "winner": "a",
       "changelog": "Slightly reducing the number of mines for the default 16x16 grid from 40 to 30 will increase average session value by at least 5% because a marginally easier game is likely to lead to a higher rate of game completions, which in turn could increase active play time per session and reduce frustration.",
-      "versionUrl": null
+      "versionUrl": "https://web-game-nine-lake.vercel.app/"
     }
   ]
 }
