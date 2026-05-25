@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react'
-import type { DashboardSession, FingerprintEvent, FingerprintAnnotation, BehavioralState } from '../../types/dashboard'
+import type { DashboardSession, FingerprintEvent, FingerprintAnnotation } from '../../types/dashboard'
 import FingerprintRadar from './FingerprintRadar'
 
 interface Props {
