@@ -338,7 +338,7 @@ export default function Dashboard() {
           <div className="mt-10 mb-6">
             <h2 className="text-xl font-bold">Experiment Metrics</h2>
           </div>
-          <MetricChart experiments={expData.experiments} />
+          <MetricChart sessions={dashData?.sessions || []} />
 
           <div className="mt-10">
             <h2 className="mb-4 text-xl font-bold">Experiment History</h2>
